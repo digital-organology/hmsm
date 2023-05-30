@@ -3,6 +3,12 @@ requires = ["setuptools", ]
 build-backend = "setuptools.build_meta"
 
 [project]
+name = "hmsm"
+authors = [
+    {name = "David Fuhry", email = "david.fuhry@uni-leipzig.de"}
+]
+description = "Tools for image based digitization of historical music storage media"
+license = {text = "GPL-3.0"}
 requires-python = ">=3.11"
 dependencies = [
     "scikit-image",
@@ -11,3 +17,4 @@ dependencies = [
     "numpy",
     "matplotlib",
 ]
+dynamic = ["version"]
