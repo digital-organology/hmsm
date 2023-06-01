@@ -7,7 +7,7 @@ from typing import Optional
 from skimage.filters import threshold_otsu
 from skimage.color import rgb2gray
 from skimage.io import imread
-from skimage import img_as_ubyte
+from skimage import img_as_ubyte, img_as_float
 from scipy import interpolate
 
 def read_as_binary_image(path: str, threshold: Optional[int] = None) -> np.ndarray:

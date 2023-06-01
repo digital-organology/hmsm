@@ -18,3 +18,6 @@ dependencies = [
     "matplotlib",
 ]
 dynamic = ["version"]
+
+[project.scripts]
+disc2roll = "hmsm.cli:disc2roll"
