@@ -3,7 +3,10 @@ import os
 import sys
 import argparse
 import cv2
-from hmsm import utils, cardboard_discs
+import traceback
+import hmsm.discs.utils
+import hmsm.discs
+from hmsm.config import get_config
 from skimage.io import imread, imsave
 
 def disc2roll(argv = sys.argv):
@@ -28,7 +31,33 @@ def disc2roll(argv = sys.argv):
         logging.error(f"The system could not find the specified file at path '{args.input}', could not read image file")
         sys.exit()
     logging.info("Beginning transformation process")
-    output = cardboard_discs.transform_to_rectangle(image, args.offset, args.binarize)
+    output = hmsm.discs.utils.transform_to_rectangle(image, args.offset, args.binarize)
     logging.info("Transformation processed")
     imsave(args.output, output)
     logging.info(f"Output written to {args.output}")
+
+def disc2midi(argv = sys.argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", help = "Input image file")
+    parser.add_argument("output", help = "Filename to write output midi to")
+    required_named = parser.add_argument_group("required named arguments")
+    required_named.add_argument("-c", "--config", dest = "config", required = True, help = "Configuration to use for digitization. Must be either the name of a provided profile, path to a json file containing the required information or a json string with configuration data.")
+    required_named.add_argument("-m", "--method", dest = "method", required=True, help = "Method to use for digitization. Currently only 'cluster' is supported.")
+    parser.add_argument("-d", "--debug", action = "store_true", help = "Enable debug output. Note that this will also output various messages from other used python packages and add siginificant calculation overhead for creating debug information.")
+    parser.set_defaults(debug = False)                                                   
+    args = parser.parse_args(argv[1:])
+
+    logging.basicConfig(
+        level = logging.DEBUG if args.debug else logging.INFO,
+        format = "%(asctime)s [%(levelname)s]: %(message)s"
+    )
+
+    try:
+        config = get_config(args.config, args.method)
+    except Exception:
+        logging.error("Failed to read configuration, the following exception occured:")
+        traceback.print_exc()
+        sys.exit(1)
+
+    hmsm.discs.process_disc(args.input, args.output, args.method, config, args.debug)
+

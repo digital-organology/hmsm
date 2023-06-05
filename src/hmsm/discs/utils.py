@@ -1,23 +1,20 @@
+import logging
+import numpy as np
+import cv2
+from typing import Optional
 import cv2
 import numpy as np
 import logging
 from skimage.measure import EllipseModel, label
 from scipy.spatial import distance
 from typing import Optional, Tuple
-from hmsm.utils import read_as_binary_image, crop_image_to_contents, morphological_edge_detection, binarize_image, interpolate_missing_pixels
-
-# For debugging only
-import matplotlib.pyplot as plt
-
-
-def process_disc():
-    pass
+from hmsm.utils import crop_image_to_contents, morphological_edge_detection, binarize_image, interpolate_missing_pixels
 
 def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binarize: Optional[bool] = False) -> np.ndarray:
     """Transforms an image of a circular music storage medium to the shape of a rectangular one
 
     Args:
-        image (np.ndarray): The image to be transformed, can be a binary image as returned by :func:`~hmsm.utils.read_as_binary_image` or just an image as read by skimage.imread
+        image (np.ndarray): The image to be transformed, can be a binary image as returned by :func:`~hmsm.utils.read_image` or just an image as read by skimage.imread
         offset (Optional[int], optional): The offset (in degrees, counterclockwise) of the beginning of the disc. Defaults to 0.
         binarize (Optional[bool], optional): Weather the output image should be binarized.
 
@@ -116,3 +113,24 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
     b = int(b)
 
     return (center_x, center_y, a, b, theta)
+
+
+def to_coord_lists(edge_image: np.ndarry) -> dict:
+    # Label connected components
+    labels = label(edge_image, background = 0, connectivity = 2)
+
+    # Most fast ways to do this only work on 1d arrays, so we flatten out the array first and get the indices for each unique element then
+    # after which we stich everything back together to get 2d indices
+
+    labels_flat = labels.ravel()
+    labels_flat_sorted = np.argsort(labels_flat)
+    keys, indices_flattend = np.unique(labels_flat[labels_flat_sorted], return_index=True)
+    labels_ndims = np.unravel_index(labels_flat_sorted, labels.shape)
+    labels_ndims = np.c_[labels_ndims] if labels.ndim > 1 else labels_flat_sorted
+    indices = np.split(labels_ndims, indices_flattend[1:])
+    coords = dict(zip(keys, indices))
+    
+    # We can most likely get away with just deleting the first element (as it should always be 0, meaning the background)
+    coords.pop(0, None)
+
+    return coords

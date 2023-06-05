@@ -40,3 +40,4 @@ repository = "https://github.com/digital-organology/hmsm"
 
 [project.scripts]
 disc2roll = "hmsm.cli:disc2roll"
+disc2midi = "hmsm.cli:disc2midi"

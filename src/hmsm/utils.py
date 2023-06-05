@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import numpy as np
+import pkg_resources
 import cv2
 from typing import Optional
 from skimage.filters import threshold_otsu
@@ -10,7 +11,7 @@ from skimage.io import imread
 from skimage import img_as_ubyte, img_as_float
 from scipy import interpolate
 
-def read_as_binary_image(path: str, threshold: Optional[int] = None) -> np.ndarray:
+def read_image(path: str, binarize: bool = False, threshold: Optional[int] = None) -> np.ndarray:
     try:
         img = imread(path)
     except FileNotFoundError:
@@ -21,10 +22,10 @@ def read_as_binary_image(path: str, threshold: Optional[int] = None) -> np.ndarr
 
     logging.info(f"Image read from '{path}'")
 
-    return binarize_image(img)
+    return binarize_image(img, threshold) if binarize else img
 
 def binarize_image(image: np.ndarray, threshold: Optional[int] = None) -> np.ndarray:
-    if image.shape[2] == 3:
+    if image.ndim == 3 and image.shape[2] == 3:
         image = rgb2gray(image)
     
     if threshold is None:
@@ -33,7 +34,7 @@ def binarize_image(image: np.ndarray, threshold: Optional[int] = None) -> np.nda
         threshold = (threshold / 255)
 
     img_bin = image > threshold
-    img_bin = np.invert(img_bin)
+    # img_bin = np.invert(img_bin)
 
     return img_as_ubyte(img_bin)
 
@@ -44,16 +45,23 @@ def crop_image_to_contents(image: np.ndarray) -> np.ndarray:
     if image.ndim == 3 or np.unique(image).size > 2:
         image = binarize_image(image)
 
-    y_values, x_values = np.nonzero(image)
+    # Check if the background is ones and if so invert the image for cropping
+
+    if image[0,0] == 1 and image[0,-1] == 1 and image[-1, 0] == 1 and image[-1,-1] == 1:
+        img = np.invert(image.copy())
+    else:
+        img = image
+
+    y_values, x_values = np.nonzero(img)
 
     y_min = y_values.min() - 20 if y_values.min() - 20 >= 0 else 0
-    y_max = y_values.max() + 20 if y_values.max() + 20 <= image.shape[0] - 1 else image.shape[0] - 1
+    y_max = y_values.max() + 20 if y_values.max() + 20 <= img.shape[0] - 1 else img.shape[0] - 1
 
     x_min = x_values.min() - 20 if x_values.min() - 20 >= 0 else 0
-    x_max = x_values.max() + 20 if x_values.max() + 20 <= image.shape[1] - 1 else image.shape[1] - 1
+    x_max = x_values.max() + 20 if x_values.max() + 20 <= img.shape[1] - 1 else img.shape[1] - 1
 
-    cropped_image = output_image[y_min:y_max, x_min:x_max]
-    return cropped_image
+    output_image = output_image[y_min:y_max, x_min:x_max]
+    return output_image
 
 def morphological_edge_detection(image: np.ndarray, n_erosions: Optional[int] = 2) -> np.ndarray:
     kernel = np.ones((3,3), np.uint8)
@@ -78,3 +86,11 @@ def interpolate_missing_pixels(image: np.ndarray, mask: np.ndarray) -> np.ndarra
     interpolated_image = image.copy()
     interpolated_image[unknown_coords[:,0], unknown_coords[:,1]] = interpolated_values
     return interpolated_image
+
+def get_lut() -> np.ndarray:
+    file = pkg_resources.resource_filename(__name__, "data/lut.npy")
+
+    with open(file, "rb") as f:
+        lut = np.load(f)
+
+    return lut
