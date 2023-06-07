@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import pkg_resources
 import cv2
-from typing import Optional
+from typing import Optional, Tuple
 from skimage.filters import threshold_otsu
 from skimage.color import rgb2gray
 from skimage.io import imread
@@ -47,7 +47,9 @@ def crop_image_to_contents(image: np.ndarray) -> np.ndarray:
 
     # Check if the background is ones and if so invert the image for cropping
 
-    if image[0,0] == 1 and image[0,-1] == 1 and image[-1, 0] == 1 and image[-1,-1] == 1:
+    max_value = image.max()
+
+    if image[0,0] == max_value and image[0,-1] == max_value and image[-1, 0] == max_value and image[-1,-1] == max_value:
         img = np.invert(image.copy())
     else:
         img = image
@@ -94,3 +96,18 @@ def get_lut() -> np.ndarray:
         lut = np.load(f)
 
     return lut
+
+def image_from_coords(coords: dict|list, shape: Tuple[int, int]) -> np.ndarray:
+    if isinstance(coords, list):
+        coords = dict(zip(range(1, len(coords) + 1), coords))
+    
+
+    bg = np.zeros(shape, np.uint8)
+
+    for id, coords in coords:
+        bg[coords[:,0], coords[:,1]] = id
+
+    lut = get_lut()
+
+    clr_img = cv2.LUT(cv2.merge((bg, bg, bg)), lut)
+    return clr_img

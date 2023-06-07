@@ -6,8 +6,8 @@ import cv2
 import traceback
 import hmsm.discs.utils
 import hmsm.discs
-from hmsm.config import get_config
-from skimage.io import imread, imsave
+import hmsm.config
+import skimage.io
 
 def disc2roll(argv = sys.argv):
     parser = argparse.ArgumentParser()
@@ -25,15 +25,16 @@ def disc2roll(argv = sys.argv):
         format = "%(asctime)s [%(levelname)s]: %(message)s"
     )
 
+
     try:
-        image = imread(args.input)
+        image = skimage.io.imread(args.input)
     except FileNotFoundError:
         logging.error(f"The system could not find the specified file at path '{args.input}', could not read image file")
         sys.exit()
     logging.info("Beginning transformation process")
     output = hmsm.discs.utils.transform_to_rectangle(image, args.offset, args.binarize)
     logging.info("Transformation processed")
-    imsave(args.output, output)
+    skimage.io.imsave(args.output, output)
     logging.info(f"Output written to {args.output}")
 
 def disc2midi(argv = sys.argv):
@@ -53,11 +54,10 @@ def disc2midi(argv = sys.argv):
     )
 
     try:
-        config = get_config(args.config, args.method)
+        config = hmsm.config.get_config(args.config, args.method)
     except Exception:
         logging.error("Failed to read configuration, the following exception occured:")
         traceback.print_exc()
         sys.exit(1)
 
     hmsm.discs.process_disc(args.input, args.output, args.method, config, args.debug)
-

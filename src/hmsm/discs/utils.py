@@ -115,7 +115,7 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
     return (center_x, center_y, a, b, theta)
 
 
-def to_coord_lists(edge_image: np.ndarry) -> dict:
+def to_coord_lists(edge_image: np.ndarray) -> dict:
     # Label connected components
     labels = label(edge_image, background = 0, connectivity = 2)
 
