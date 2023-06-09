@@ -32,7 +32,8 @@ dependencies = [
     "opencv-python",
     "numpy",
     "matplotlib",
-    "scikit-learn"
+    "scikit-learn",
+    "mido"
 ]
 
 [project.urls]

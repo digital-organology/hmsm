@@ -97,14 +97,19 @@ def get_lut() -> np.ndarray:
 
     return lut
 
-def image_from_coords(coords: dict|list, shape: Tuple[int, int]) -> np.ndarray:
+def image_from_coords(coords: dict|list, shape: Optional[Tuple[int, int]] = None, plot_labels: Optional[bool] = False) -> np.ndarray:
     if isinstance(coords, list):
         coords = dict(zip(range(1, len(coords) + 1), coords))
+
+
     
+    if shape is None:
+        max_values = np.vstack([el.max(axis = 0) for el in coords.values()]).max(axis = 0)
+        shape = (max_values[0] + 10, max_values[1] + 10)
 
     bg = np.zeros(shape, np.uint8)
 
-    for id, coords in coords:
+    for id, coords in coords.items():
         bg[coords[:,0], coords[:,1]] = id
 
     lut = get_lut()
