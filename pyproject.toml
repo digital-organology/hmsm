@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools", ]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "hmsm"
-version = "0.0.1"
+version = "0.1.0"
 authors = [
     {name = "David Fuhry", email = "david.fuhry@uni-leipzig.de"}
 ]
@@ -44,3 +44,9 @@ repository = "https://github.com/digital-organology/hmsm"
 [project.scripts]
 disc2roll = "hmsm.cli:disc2roll"
 disc2midi = "hmsm.cli:disc2midi"
+
+[tools.setuptools.packages.find]
+exclude = ["assets*", "docs*"]
+
+[tool.setuptools.package-data]
+"hmsm.data" = ["*.json", "*.npy"]
