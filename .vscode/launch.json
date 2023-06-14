@@ -15,7 +15,7 @@
                 "-c", "ariston",
                 "-m", "cluster",
                 "--debug",
-                "5070081_22.JPG",
+                "assets/5070081_22.JPG",
                 "out.mid"
             ]
         },
@@ -27,7 +27,7 @@
             "justMyCode": true,
             "args": [
                 "disc2roll",
-                "5070081_22.JPG",
+                "assets/5070081_11.JPG",
                 "roll.jpg"
             ]
         }
