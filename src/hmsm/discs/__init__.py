@@ -1,23 +1,27 @@
-import cv2
-import numpy as np
+# Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
+
 import logging
-from skimage.measure import EllipseModel, label
-from scipy.spatial import distance
-from typing import Optional, Tuple
-from hmsm.utils import read_image
+import hmsm.utils
 import hmsm.discs.cluster
+from typing import Optional
 
+def process_disc(input_path: str, output_path: str, method: str, config: dict, offset: Optional[int] = 0) -> None:
+    """Perform image based midi generation on a disc shaped medium
 
-# For debugging only
-import matplotlib.pyplot as plt
+    This is a wrapper method that will read the input image and then dispatch the appropriate processing method.
 
-def process_disc(input_path: str, output_path: str, method: str, config: dict, verbose: Optional[bool] = False) -> None:
+    Args:
+        input_path (str): File path to the input image
+        output_path (str): File path to the output midi file
+        method (str): Method to use for digitization, currently only 'cluster' is implemented
+        config (dict): Dictionary containing required configuration parameters
+    """
     logging.info(f"Reading input image from {input_path}")
 
-    input = read_image(input_path)
+    input = hmsm.utils.read_image(input_path)
 
     logging.info("Input image read successfully")
 
     if method == "cluster":
-        hmsm.discs.cluster.process_disc(input, output_path, config, verbose)
+        hmsm.discs.cluster.process_disc(input, output_path, config = config, offset = offset)
 

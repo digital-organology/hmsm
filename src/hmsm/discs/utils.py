@@ -1,14 +1,17 @@
+# Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
+
 import logging
 import numpy as np
 import cv2
-from typing import Optional
 import cv2
 import numpy as np
 import logging
-from skimage.measure import EllipseModel, label
-from scipy.spatial import distance
+import hmsm.utils
+import os
+import skimage.measure
+import hmsm.utils
+import scipy.spatial
 from typing import Optional, Tuple
-from hmsm.utils import crop_image_to_contents, morphological_edge_detection, binarize_image, interpolate_missing_pixels
 
 def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binarize: Optional[bool] = False) -> np.ndarray:
     """Transforms an image of a circular music storage medium to the shape of a rectangular one
@@ -24,9 +27,9 @@ def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binariz
     # Apply preprocessing
 
     if binarize:
-        image = binarize_image(image)
+        image = hmsm.utils.binarize_image(image)
 
-    image = crop_image_to_contents(image.copy())
+    image = hmsm.utils.crop_image_to_contents(image.copy())
 
     logging.info("Determening disc measurements and center")
 
@@ -69,7 +72,7 @@ def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binariz
 
     # Calculate distances
 
-    dists = np.round(distance.cdist(np.array([[0, 0]]), coords)[0], decimals = 0).astype(np.uint16)
+    dists = np.round(scipy.spatial.distance.cdist(np.array([[0, 0]]), coords)[0], decimals = 0).astype(np.uint16)
 
     # Build 2d image
 
@@ -84,19 +87,29 @@ def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binariz
     mask = np.full((image_rect.shape[0], image_rect.shape[1]), True, bool)
     mask[degrees, dists] = False
 
-    interpolated_image = interpolate_missing_pixels(image_rect, mask)
+    interpolated_image = hmsm.utils.interpolate_missing_pixels(image_rect, mask)
 
     return interpolated_image
 
 def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int, float]:
+    """Fit ellipse equation to circumference of disc
+
+    This method will try to find the outer edge of the disc in the provided image, fit an ellipse through the points on that edge and return the parameters of the fitted ellipse.
+
+    Args:
+        image (np.ndarray): Image of a disc shaped medium, binarization and edge detection will be run automatically
+
+    Returns:
+        Tuple[int, int, int, int, float]: xc, yx, a, b, theta as calculated by skimage.measure.EllipseModel
+    """
     if image.ndim == 3 or np.unique(image).size > 2:
-        image = binarize_image(image)
+        image = hmsm.utils.binarize_image(image)
     
     # Label the image to find the outer edge of the disc
 
-    edges = morphological_edge_detection(image)
+    edges = hmsm.utils.morphological_edge_detection(image)
 
-    labels = label(edges, background = 0, connectivity = 2)
+    labels = skimage.measure.label(edges, background = 0, connectivity = 2)
 
     # We can generally assume the outer edge to be the first label, though we might implement additional methods for messier images in the future
 
@@ -104,7 +117,7 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
 
     # Fit an ellipse to the outer edge to determine the image center
 
-    ell = EllipseModel()
+    ell = skimage.measure.EllipseModel()
     ell.estimate(edge)
     center_x, center_y, a, b, theta = ell.params
     center_x = int(center_x)
@@ -117,7 +130,7 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
 
 def to_coord_lists(edge_image: np.ndarray) -> dict:
     # Label connected components
-    labels = label(edge_image, background = 0, connectivity = 2)
+    labels = skimage.measure.label(edge_image, background = 0, connectivity = 2)
 
     # Most fast ways to do this only work on 1d arrays, so we flatten out the array first and get the indices for each unique element then
     # after which we stich everything back together to get 2d indices
@@ -132,5 +145,12 @@ def to_coord_lists(edge_image: np.ndarray) -> dict:
     
     # We can most likely get away with just deleting the first element (as it should always be 0, meaning the background)
     coords.pop(0, None)
+
+    logger = logging.getLogger()
+
+    if logger.isEnabledFor(logging.DEBUG):
+        image = hmsm.utils.image_from_coords(indices, edge_image.shape, keys)
+        cv2.imwrite(os.path.join("debug_data", "labels.jpg"), image)
+
 
     return coords

@@ -7,10 +7,11 @@ import hmsm.midi
 import logging
 import cv2
 import sklearn.cluster
-from scipy.spatial import distance
+import os
+import scipy.spatial
 from typing import Optional, Tuple
 
-def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset: Optional[int] = 0, verbose: Optional[bool] = False) -> None:
+def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset: Optional[int] = 0) -> None:
     """Performs clustering based digitization of an input image
 
     This method will take the provided input image of a cardboard disc and attempt to extract all required information to create a midi file from it.
@@ -48,11 +49,18 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
 
     # Fit ellipse and find center
 
+    # A note to myself: Coordinate order in python/numpy/opencv/etc. is...weird
+    # The center coordinates the ellipse model returns are named xc and yx, however they are actually row,column indices
+    # There are reasons for this behaviour (so I've been told).
+    # For all practical purposes we should always be fine by using the coordinates in the order (y,x) (which really is (x,y) but who knows what reality is at this point),
+    # which is also what we get from numpy when calculating indices, 
+    # except for one use case, which is the distance calculation from scipy spatial where we have to provide them as (center_x, center_y)
+
     center_x, center_y, a, b, theta = hmsm.discs.utils.fit_ellipse_to_circumference(bin_image)
 
-    # Remove everything on the inner disc
+    # Remove everything that is on the inner disc label
 
-    ellipse_mask = cv2.ellipse(np.zeros((edges.shape[0], edges.shape[1]), np.uint8), (center_x, center_y), (int(a * config["radius_inner"]), int(b * config["radius_inner"])), theta, 0, 360, 1, -1)
+    ellipse_mask = cv2.ellipse(np.zeros((edges.shape[0], edges.shape[1]), np.uint8), (center_y, center_x), (int(a * config["radius_inner"]), int(b * config["radius_inner"])), theta, 0, 360, 1, -1)
 
     edges[ellipse_mask == 1] = 0
 
@@ -60,18 +68,25 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
 
     coords = hmsm.discs.utils.to_coord_lists(edges)
 
-    # Get the outer edge of the disc for distance calculations
-    # We could also get the edge from the edge image that is the outer edge,
-    # however this could lead to wrong calculations if the disc has physical damages
+    # Get the outer edge of the disc for distance calculationsä
+    # We currently do this by getting the biggest edge of our edge list (which should always be the outer disc edge)
+    # We could calculate the edge from the ellipse formula like following,
+    # which should be better in case the disc has physical damages around it's edges
+    # but also introduces some (possibly very minor) inaccuracies
 
-    outer_edge = cv2.ellipse(np.zeros((edges.shape[0], edges.shape[1]), np.uint8), (center_x, center_y), (int(a), int(b)), theta, 0, 360, 1, 1)
-    outer_edge = np.argwhere(outer_edge == 1)
+    # outer_edge = cv2.ellipse(np.zeros((edges.shape[0], edges.shape[1]), np.uint8), (center_y, center_x), (int(a), int(b)), theta, 0, 360, 1, 1)
+    # outer_edge = np.argwhere(outer_edge == 1)
 
-    # We can now drop the edge of the outer edge, it should always be the one with the most pixels
-    
-    del coords[max(coords, key = lambda k: coords[k].shape[0])]
+    outer_edge_key = max(coords, key = lambda k: coords[k].shape[0])
+    outer_edge = coords[outer_edge_key]
 
-    track_mapping = assign_tracks(coords, (center_y, center_x), outer_edge, len(config["track_mapping"]), config["first_track"])
+    # We can now drop the edge of the outer edge
+
+    del coords[outer_edge_key]
+
+    # Note the swapped center coordinates here and here only
+
+    track_mapping = assign_tracks(coords, (center_x, center_y), outer_edge, len(config["track_mapping"]), config["first_track"])
     
     # Calculate the start and end positions of every hole relative to the circumference of the disc
 
@@ -84,12 +99,6 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
     midi_file = hmsm.midi.create_midi(timing_data[:,1].tolist(), timing_data[:,3].tolist(), midi_notes)
 
     midi_file.save(output_path)
-
-    # plot_data = zip(track_mapping.values(), coords.values())
-
-
-    # print("Hi from the clustering digitization method")
-    # pass
 
 def calculate_note_timings(coords: dict, center: Tuple[int, int], offset: Optional[int] = 0) -> np.ndarray:
     """Calculate timing information
@@ -121,9 +130,43 @@ def calculate_note_timings(coords: dict, center: Tuple[int, int], offset: Option
     timing_data[:,3] = timing_data[:,2] - timing_data[:,1]
     timing_data[:,[1,2]] = timing_data[:,[1,2]] + 180
 
-    if offset > 0:
-        timing_data[:,[1,2]] = timing_data[:,[1,2]] - offset
-        timing_data[:,[1,2]][timing_data[:,[1,2]] < 0] = timing_data[:,[1,2]][timing_data[:,[1,2]] < 0] + 360
+    if offset is not None and offset > 0:
+        note_timings = timing_data[:,[1,2]]
+        note_timings = note_timings - offset
+        note_timings[note_timings < 0] = note_timings[note_timings < 0] + 360
+        timing_data[:,[1,2]] = note_timings
+
+    # At this point we can potentially run into two problems:
+    # Notes that sounded over the original start position and have a start time that is higher than their end time after appling the offset
+    # aswell as notes that were not orginally sounding over the start positon but are now
+
+    def sanitize_notes(row):
+        # Doing this rowwise (as we do here) is most certainly less efficient than fixing both problems seperatly with vectorized operations
+        # However as we only have a very limited number of rows (in the order of 10^3) we do it this way for better maintainabiltity
+
+        if row[2] > row[1]:
+            return row
+        
+        # For the first class of notes we just switch around start and end time and recalculate their length
+
+        if row[3] > 100:
+            row = row[[0,2,1,3]]
+            row[3] = row[2] - row[1]
+            return row
+        
+        # For the second class of problematic values the 'correct' solution is a bit less clear
+        # We currently drop the part that sounds shorter when split on the starting position, though this might be problematic in some cases
+        # However this problem almost certainly stems from an incorrect alignment of the starting position of the disc so we're really just doing damage control here
+
+        if 360 - row[1] < row[2]:
+            row[1] = 0
+        else:
+            row[2] = 360
+
+        row[3] = row[2] - row[1]
+        return row
+
+    timing_data = np.apply_along_axis(sanitize_notes, axis = 1, arr = timing_data)
 
     return timing_data
 
@@ -134,7 +177,7 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
 
     Args:
         coords (dict): Dic
-        center (Tuple[int, int]): Position of the center of the disc, in the form (y, x)
+        center (Tuple[int, int]): Position of the center of the disc, crucially in the form (x, y)
         outer_edge (np.ndarray): Coordinate list of the outer edge of the disc
         n_tracks (int): Theoretical number of tracks on the disc, regardless of whether they are used on this particular medium
         first_track (float): Relative distance of the first track between disc center and outer edge
@@ -150,13 +193,16 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
     # use the same paramters for clustering regardless of the actual image size
     distances = list()
     
-    for edge in coords.values():
+    for idx, edge in coords.items():
         # This is not super accurate and one might consider using the closest or farthest point of each edge relative to the center
         # however practical testing showed that there is no practical difference in clustering quality
         edge_center = np.mean(edge, 0).astype(np.uint16)
         edge_center = np.expand_dims(edge_center, axis = 0)
-        dist_inner = distance.cdist(edge_center, [center]).min()
-        dist_outer = distance.cdist(edge_center, outer_edge).min()
+
+        dist_inner = scipy.spatial.distance.cdist(edge_center, [center]).min()
+        dist_outer = scipy.spatial.distance.cdist(edge_center, outer_edge).min()
+        # dist_inner = scipy.spatial.distance.cdist(edge_center, [center]).min()
+        # dist_outer = scipy.spatial.distance.cdist(edge_center, outer_edge).min()
         distances.append(dist_inner / (dist_outer + dist_inner))
 
     # Use MeanShift clustering to group edges together
@@ -167,10 +213,10 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
     cluster_data = np.array(distances)
     cluster_data = cluster_data * 1000
     cluster_data = np.column_stack((cluster_data, np.zeros(len(cluster_data))))
-    cluster_data = cluster_data.astype(np.uint32)
+    cluster_data = cluster_data.astype(int)
     # Using a bandwidth of 8 has shown to work generally well in empirical testing
     # It should do so across multiple disc sizes as we scale for the disc radius
-    mean_shift = sklearn.cluster.MeanShift(bandwidth = 8, bin_seeding = True)
+    mean_shift = sklearn.cluster.MeanShift(bandwidth = 8)
     mean_shift.fit(cluster_data)
     labels = mean_shift.labels_
 
@@ -252,7 +298,8 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
 
     if logger.isEnabledFor(logging.DEBUG):
         plot_data = dict(zip(assignments.values(), coords.values()))
-        debug_image = hmsm.utils.image_from_coords(plot_data, plot_labels = True)
+        debug_image = hmsm.utils.image_from_coords(list(coords.values()), labels = list(assignments.values()))
+        cv2.imwrite(os.path.join("debug_data", "tracks_after_correction.jpg"), debug_image)
 
     return assignments
 

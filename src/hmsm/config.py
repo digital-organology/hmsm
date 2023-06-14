@@ -1,9 +1,9 @@
+# Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
+
 import json
-import os
 import pkg_resources
 import logging
 import re
-
 
 def get_config(config: str, method: str) -> dict:
     """Find and load configuration data
@@ -93,6 +93,14 @@ def validate_config(config: dict, type: str, method: str) -> bool:
 
 
 def _validate_cluster_config(config: dict) -> bool:
+    """Checks if all required parameters for clustering based midi digitization are set
+
+    Args:
+        config (dict): Configuration parameters
+
+    Returns:
+        bool: True if the configuration is valid, False otherwise
+    """
     required_keys = {"radius_inner", "first_track", "track_mapping"}
     if not required_keys <= config.keys():
         logging.error(f"Configuration misses the following required values: {required_keys - config.keys()}")

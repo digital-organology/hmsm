@@ -1,44 +1,76 @@
+# Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
+
 import logging
-import os
-import sys
 import numpy as np
 import pkg_resources
 import cv2
+import skimage.filters
+import skimage.color
+import skimage.io
+import skimage
+import scipy
 from typing import Optional, Tuple
-from skimage.filters import threshold_otsu
-from skimage.color import rgb2gray
-from skimage.io import imread
-from skimage import img_as_ubyte, img_as_float
-from scipy import interpolate
 
 def read_image(path: str, binarize: bool = False, threshold: Optional[int] = None) -> np.ndarray:
+    """Read an image from disk
+
+    Wrapper around skimage.io.imread that will also perform binarization if desired
+
+    Args:
+        path (str): Filepath to read the image from
+        binarize (bool, optional): Perform binarization on the input image. Defaults to False.
+        threshold (Optional[int], optional): Threshold to use for binarization. If missing will use Otsu's method to estimate. Defaults to None.
+
+    Returns:
+        np.ndarray: Image as read from path, with binarization applied if requested
+    """
     try:
-        img = imread(path)
+        img = skimage.io.imread(path)
     except FileNotFoundError:
         logging.error(f"The system could not find the specified file at path '{path}', could not read image file")
         raise
-
-    img = imread(path)
 
     logging.info(f"Image read from '{path}'")
 
     return binarize_image(img, threshold) if binarize else img
 
 def binarize_image(image: np.ndarray, threshold: Optional[int] = None) -> np.ndarray:
+    """Binarize image
+
+    This will convert the input image to grayscale if necessary and then perform binarization, either with the provided threshold value or with an estimated one.
+
+    Args:
+        image (np.ndarray): Input image, can be color (rgb) or grayscale.
+        threshold (Optional[int], optional): Threshold to use for binarization. Will be estimated using Otsu's method if missing. Defaults to None.
+
+    Returns:
+        np.ndarray: Binarized input image
+    """
     if image.ndim == 3 and image.shape[2] == 3:
-        image = rgb2gray(image)
+        image = skimage.color.rgb2gray(image)
     
     if threshold is None:
-        threshold = threshold_otsu(image)
+        threshold = skimage.filters.threshold_otsu(image)
     else:
         threshold = (threshold / 255)
 
     img_bin = image > threshold
-    # img_bin = np.invert(img_bin)
 
-    return img_as_ubyte(img_bin)
+    return skimage.img_as_ubyte(img_bin)
 
 def crop_image_to_contents(image: np.ndarray) -> np.ndarray:
+    """Crop image to contents
+
+    This will binarize the input image if required and crop it to the area that actually has content.
+    The method will test the pixels at the very edge of the image and if they are all filled after binarization,
+    assume the image has a light background and invert it before cropping.
+
+    Args:
+        image (np.ndarray): Image to crop, can be rgb or grayscale
+
+    Returns:
+        np.ndarray: Cropped image
+    """
     output_image = image.copy()
 
     # Binarize the image to make sure we don't get stiffled by some weird gray values
@@ -66,6 +98,18 @@ def crop_image_to_contents(image: np.ndarray) -> np.ndarray:
     return output_image
 
 def morphological_edge_detection(image: np.ndarray, n_erosions: Optional[int] = 2) -> np.ndarray:
+    """Detect edges on the input image
+
+    This will perform morphological edge detection on the input image.
+    Edges will be calculated by performing an erosion on the input image and then calculating the difference between the eroded image and the original input.
+
+    Args:
+        image (np.ndarray): Input image, needs to be binarized
+        n_erosions (Optional[int], optional): Number of erosions to perform. These are additional erosions performed before the erosion used for edge detection and can help with better edge seperation. Defaults to 2.
+
+    Returns:
+        np.ndarray: Image of the same shape as the input image with edges
+    """
     kernel = np.ones((3,3), np.uint8)
 
     for n in range(n_erosions):
@@ -78,9 +122,18 @@ def morphological_edge_detection(image: np.ndarray, n_erosions: Optional[int] = 
     return edges
 
 def interpolate_missing_pixels(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Interpolate missing pixels in an image
+
+    Args:
+        image (np.ndarray): Input image with unknown pixel values, needs to be a color image with three channels
+        mask (np.ndarray): Bool array of the same shape as image with True on positions where pixel values are unknown in Image and should be interpolated
+
+    Returns:
+        np.ndarray: Input image with interpolated pixels
+    """
     unknown_coords = np.argwhere(mask == True)
 
-    interpolated_values = interpolate.griddata(
+    interpolated_values = scipy.interpolate.griddata(
         np.argwhere(mask == False), image[mask == False], unknown_coords,
         method="nearest", fill_value= [0,0,0]
     )
@@ -90,6 +143,11 @@ def interpolate_missing_pixels(image: np.ndarray, mask: np.ndarray) -> np.ndarra
     return interpolated_image
 
 def get_lut() -> np.ndarray:
+    """Load a lut included in the package
+
+    Returns:
+        np.ndarray: LUT
+    """
     file = pkg_resources.resource_filename(__name__, "data/lut.npy")
 
     with open(file, "rb") as f:
@@ -97,10 +155,23 @@ def get_lut() -> np.ndarray:
 
     return lut
 
-def image_from_coords(coords: dict|list, shape: Optional[Tuple[int, int]] = None, plot_labels: Optional[bool] = False) -> np.ndarray:
+def image_from_coords(coords: dict|list, shape: Optional[Tuple[int, int]] = None, labels: Optional[bool|list] = None) -> np.ndarray:
+    """Make an image from coordinate lists
+
+    Args:
+        coords (dict | list): List or dictionary of coordinate lists
+        shape (Optional[Tuple[int, int]], optional): Dimensions of the output image. If missing will be infered from the provided coordinate lists. Defaults to None.
+        labels (Optional[bool | list], optional): Labels to plot on the image. If missing no labels will be printed, when a list is provided it will be used as labels, if set to true the dictionary keys will be used as labels (these might be autogenerated if coords is a list). Defaults to None.
+
+    Raises:
+        ValueError: Will be raised if labels is a list of not exactly the same length as coords
+
+
+    Returns:
+        np.ndarray: Color image with the plotted coordinate lists.
+    """
     if isinstance(coords, list):
         coords = dict(zip(range(1, len(coords) + 1), coords))
-
 
     
     if shape is None:
@@ -109,10 +180,31 @@ def image_from_coords(coords: dict|list, shape: Optional[Tuple[int, int]] = None
 
     bg = np.zeros(shape, np.uint8)
 
-    for id, coords in coords.items():
-        bg[coords[:,0], coords[:,1]] = id
+    for id, coord_list in coords.items():
+        bg[coord_list[:,0], coord_list[:,1]] = id
 
     lut = get_lut()
 
     clr_img = cv2.LUT(cv2.merge((bg, bg, bg)), lut)
+
+    if not labels is None:
+        if isinstance(labels, list):
+            if len(labels) != len(coords):
+                raise ValueError("There must be exactly as many labels as coordinate lists to plot")
+        else:
+            labels = list(coords.keys())
+    
+        # This has memory overhead and isn't optimal, but there isn't a really good ways to iterate over a dictionary and a list at the same time
+
+        coords = list(coords.values())
+
+        for idx in range(len(coords)):
+            cv2.putText(clr_img,
+                        str(labels[idx]),
+                        tuple(np.mean(coords[idx], 0).astype(np.uint32)[[1,0]]),
+                        cv2.FONT_HERSHEY_SCRIPT_SIMPLEX,
+                        0.7,
+                        (255, 255, 255),
+                        2)
+
     return clr_img
