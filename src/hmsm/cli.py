@@ -6,6 +6,8 @@ import argparse
 import traceback
 import hmsm.discs.utils
 import hmsm.discs
+import hmsm.rolls
+import hmsm.rolls.utils
 import hmsm.config
 import skimage.io
 import pathlib
@@ -76,3 +78,21 @@ def disc2midi(argv = sys.argv):
         sys.exit(1)
 
     hmsm.discs.process_disc(args.input, args.output, args.method, config, args.offset)
+
+def roll2masks(argv = sys.argv):
+    """CLI entrypoint for mask creation on piano rolls
+
+    Args:
+        argv (list, optional): Command line arguments. Defaults to sys.argv.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", help = "Input image file")   
+    parser.add_argument("-d", "--debug", action = "store_true", help = "Enable debug output. Note that this will also output various messages from other used python packages and add siginificant calculation overhead for creating debug information.")                                          
+    args = parser.parse_args(argv[1:])
+
+    logging.basicConfig(
+        level = logging.DEBUG if args.debug else logging.INFO,
+        format = "%(asctime)s [%(levelname)s]: %(message)s"
+    )
+
+    hmsm.rolls.utils.create_masks(args.input)

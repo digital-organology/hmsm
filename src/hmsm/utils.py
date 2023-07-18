@@ -1,5 +1,7 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
+import os
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2,40).__str__()
 import logging
 import numpy as np
 import pkg_resources
