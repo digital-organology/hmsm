@@ -47,3 +47,14 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+
+# Generated output
+
+*.mp3
+*.midi
+*.mid
+
+# Full scale input images
+
+*.tif
+*.tiff
