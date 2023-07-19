@@ -7,7 +7,7 @@ import traceback
 import hmsm.discs.utils
 import hmsm.discs
 import hmsm.rolls
-import hmsm.rolls.utils
+import hmsm.rolls.masking
 import hmsm.config
 import skimage.io
 import pathlib
@@ -86,13 +86,18 @@ def roll2masks(argv = sys.argv):
         argv (list, optional): Command line arguments. Defaults to sys.argv.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("input", help = "Input image file")   
-    parser.add_argument("-d", "--debug", action = "store_true", help = "Enable debug output. Note that this will also output various messages from other used python packages and add siginificant calculation overhead for creating debug information.")                                          
+    parser.add_argument("input", help = "Input image file")
+    parser.add_argument("-s", "--chunk_size", dest = "chunk_size", default = 4000, const = 4000, nargs= "?", type = int, help = "Size of the image chunks to use for processing")
+    parser.add_argument("-n", "--n_clusters", dest = "n_clusters", default = 2, const = 2, nargs= "?", type = int, help = "Number of clusters to consider when creating masks. Note that there will always be n+1 clusters as one cluster is implicitly created during binarization.")
+    parser.add_argument("-d", "--debug", action = "store_true", help = "Enable debug output. Note that this will also output various messages from other used python packages and add siginificant calculation overhead for creating debug information.")   
+    parser.set_defaults(debug = False, n_clusters = 2, chunk_size = 4000)                                       
     args = parser.parse_args(argv[1:])
+
+    pathlib.Path("masks").mkdir(exist_ok = True)
 
     logging.basicConfig(
         level = logging.DEBUG if args.debug else logging.INFO,
         format = "%(asctime)s [%(levelname)s]: %(message)s"
     )
 
-    hmsm.rolls.utils.create_masks(args.input)
+    hmsm.rolls.masking.create_chunk_masks(args.input, args.chunk_size, args.n_clusters)
