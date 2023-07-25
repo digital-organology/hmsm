@@ -6,8 +6,7 @@ import argparse
 import traceback
 import hmsm.discs.utils
 import hmsm.discs
-import hmsm.rolls
-import hmsm.rolls.masking
+import hmsm.rolls.utils
 import hmsm.config
 import skimage.io
 import pathlib
@@ -100,4 +99,4 @@ def roll2masks(argv = sys.argv):
         format = "%(asctime)s [%(levelname)s]: %(message)s"
     )
 
-    hmsm.rolls.masking.create_chunk_masks(args.input, args.chunk_size, args.n_clusters)
+    hmsm.rolls.utils.create_chunk_masks(args.input, args.chunk_size, args.n_clusters)

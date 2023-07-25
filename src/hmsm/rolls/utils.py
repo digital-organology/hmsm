@@ -9,94 +9,39 @@ import logging
 import numpy as np
 import skimage.io
 import skimage
-from typing import Optional, Tuple
+import scipy.spatial.distance
+import hmsm.rolls.masking
+from typing import Optional, Tuple, List
 
-def find_threshold(image: np.ndarray, method: Optional[str] = "threshold_mean", n_chunks: Optional[int] = 5, chunk_size: Optional[int] = 4000, limits: Optional[Tuple[float, float]] = (0.1,0.66)) -> float:
-    """Find binarization threshold
+def create_chunk_masks(image_path: str, chunk_size: Optional[int] = 4000, n_clusters: Optional[int] = 2, n_chunks: Optional[int] = 5) -> None:
+    """Create masks for the input image
 
-    This method will find the binarization threshold on the given grayscale image by running the provided method for threshold determination on several chunks of the image.
-    This approach is choosen over finding the threshold on the complete image to preserve memory resources.
-
-    Args:
-        image (str): Image to generate thresholds on. Must be a grayscale image in the form of a 2-Dimensional numpy array.
-        method (Optional[str], optional): Method to use for threshold approximation, needs to be implemented in skimage.filters. Defaults to "threshold_mean".
-        n_chunks (Optional[int], optional): Number of chunks to generate for threshold approximation. Defaults to 5.
-        chunk_size (Optional[int], optional): Lenght of each chunk. Defaults to 4000.
-        limits (Optional[Tuple[float, float]], optional): Relative vertical bounds within the input image to use generate sample chunks within. Defaults to (0.1,0.66).
-
-    Returns:
-        float: Approximated threshold
-    """
-    assert image.ndim == 2    
-    chunk_start_idx = random.sample(range(round(image.shape[0] * limits[0]), round(image.shape[0] * limits[1])), n_chunks)
-
-    try:
-        threshold_method = getattr(skimage.filters, method)
-    except AttributeError:
-        logging.error("Invalid thresholding method supplied, needs to be a method implemented in skimage.filters")
-        raise
-    thresholds = [threshold_method(image[start_idx:start_idx+chunk_size]) for start_idx in chunk_start_idx]
-    return sum(thresholds) / len(thresholds)
-
-def read_as_binary_image(image_path: str, **kwargs) -> np.ndarray:
-    """Reads a binarized version of an image
+    This method will generate masks based on color space segmentation for the given input image.
+    To ease memory pressure this process is done chunkwise on the input image.
 
     Args:
-        image_path (str): Path to the image to be read
-        **kwargs: Additional arguments passed to the find_threshold method
-
-    Raises:
-        ValueError: Will be raised if the image could not be read from the specified path
-
-    Returns:
-        np.ndarray: Binarized version of the image at the provided path
+        image_path (str): Path to the input image.
+        chunk_size (Optional[int], optional): Vertical size of the chunks in which the image will be processed. Defaults to 4000.
+        n_clusters (Optional[int], optional): Number of cluster for which to create masks. Defaults to 2.
+        n_chunks (Optional[int], optional): Number of chunks to use for parameter estimation. Defaults to 5.
     """    
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if image is None:
-        raise ValueError("Could not read image from specified path")
-    threshold = find_threshold(image, **kwargs)
-    image = image > threshold
-    return image
 
-def create_masks(image_path: str, n_masks: Optional[int] = 2, **kwargs):
+    logging.info(f"Reading input image from {image_path}...")
+    image = skimage.io.imread(image_path)
 
-    # Create binarized image
-    binary = read_as_binary_image(image_path, **kwargs)
 
-    # Read color image
-    pixels = skimage.io.imread(image_path)
-    # Store shape of the image for later
-    img_shape = pixels.shape[:2]
+    generator = hmsm.rolls.masking.MaskGenerator(image, chunk_size, n_clusters)
 
-    # Filter out all pixels we are interested in
-    pixels = pixels[binary == False].reshape((-1, 3))
-    pixels = np.float32(pixels)
+    logging.info(f"Estimating required parameters using {n_chunks} slices of {chunk_size} pixels height each")
 
-    # Cluster into two clusters based on color
+    generator.estimate_mask_parameters()
 
-    stop_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, 0.2)
-    _, labels, (centers) = cv2.kmeans(pixels, n_masks, None, stop_criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
-    del pixels
+    logging.info(f"Parameters estimated, beginning mask creation")
 
-    centers = np.uint8(centers)
-    labels = labels.flatten()
-
-    binary_mask = skimage.img_as_ubyte(binary)
-    skimage.io.imsave(f"mask_{n_masks}.tif", binary_mask)
-    del binary_mask
-
-    masks = []
-
-    for mask_id in range(0, n_masks):
-        mask = np.zeros(img_shape, np.bool_)
-        mask[binary == False] = labels != mask_id
-        mask_ubyte = skimage.img_as_ubyte(mask)
-        skimage.io.imsave(f"mask_{mask_id}.tif", mask_ubyte)
-        del mask_ubyte
-        masks.append(mask)
-
-    masks.append(binary)
-
-    return masks
-    
-
+    for bounds, masks in iter(generator):
+        (start_idx, end_idx) = bounds
+        logging.info(f"Writing images for chunk from {start_idx} to {end_idx}")
+        for mask_id in range(len(masks)):
+            mask_ubyte = skimage.img_as_ubyte(masks[mask_id])
+            filename = os.path.join("masks", f"mask_{start_idx}_{end_idx}_{mask_id}.tif")
+            skimage.io.imsave(filename, mask_ubyte)
