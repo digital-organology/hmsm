@@ -30,6 +30,30 @@
                 "assets/5070081_11.JPG",
                 "roll.jpg"
             ]
+        },
+        {
+            "name": "roll2masks phonola",
+            "type": "python",
+            "request": "launch",
+            "module": "hmsm.debug_entry",
+            "justMyCode": true,
+            "args": [
+                "roll2masks",
+                "data/5060708_7_cropped.tif"
+            ]
+        },
+        {
+            "name": "roll2midi phonola",
+            "type": "python",
+            "request": "launch",
+            "module": "hmsm.debug_entry",
+            "justMyCode": true,
+            "args": [
+                "roll2midi",
+                "data/5060708_7_cropped.tif",
+                "phonola.mid",
+                "-c", "phonola_solodant"
+            ]
         }
     ]
 }

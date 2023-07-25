@@ -127,31 +127,3 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
     b = int(b)
 
     return (center_x, center_y, a, b, theta)
-
-
-def to_coord_lists(edge_image: np.ndarray) -> dict:
-    # Label connected components
-    labels = skimage.measure.label(edge_image, background = 0, connectivity = 2)
-
-    # Most fast ways to do this only work on 1d arrays, so we flatten out the array first and get the indices for each unique element then
-    # after which we stich everything back together to get 2d indices
-
-    labels_flat = labels.ravel()
-    labels_flat_sorted = np.argsort(labels_flat)
-    keys, indices_flattend = np.unique(labels_flat[labels_flat_sorted], return_index=True)
-    labels_ndims = np.unravel_index(labels_flat_sorted, labels.shape)
-    labels_ndims = np.c_[labels_ndims] if labels.ndim > 1 else labels_flat_sorted
-    indices = np.split(labels_ndims, indices_flattend[1:])
-    coords = dict(zip(keys, indices))
-    
-    # We can most likely get away with just deleting the first element (as it should always be 0, meaning the background)
-    coords.pop(0, None)
-
-    logger = logging.getLogger()
-
-    if logger.isEnabledFor(logging.DEBUG):
-        image = hmsm.utils.image_from_coords(indices, edge_image.shape, keys)
-        cv2.imwrite(os.path.join("debug_data", "labels.jpg"), image)
-
-
-    return coords

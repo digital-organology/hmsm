@@ -10,7 +10,11 @@ import numpy as np
 import skimage.io
 import skimage
 import scipy.spatial.distance
-import hmsm.rolls.masking
+import skimage.measure
+import hmsm.rolls
+import hmsm.utils
+import itertools
+from hmsm.rolls.masking import MaskGenerator
 from typing import Optional, Tuple, List
 
 def create_chunk_masks(image_path: str, chunk_size: Optional[int] = 4000, n_clusters: Optional[int] = 2, n_chunks: Optional[int] = 5) -> None:
@@ -34,7 +38,7 @@ def create_chunk_masks(image_path: str, chunk_size: Optional[int] = 4000, n_clus
 
     logging.info(f"Estimating required parameters using {n_chunks} slices of {chunk_size} pixels height each")
 
-    generator.estimate_mask_parameters()
+    generator.estimate_mask_parameters(n_chunks=n_chunks)
 
     logging.info(f"Parameters estimated, beginning mask creation")
 
@@ -45,3 +49,68 @@ def create_chunk_masks(image_path: str, chunk_size: Optional[int] = 4000, n_clus
             mask_ubyte = skimage.img_as_ubyte(masks[mask_id])
             filename = os.path.join("masks", f"mask_{start_idx}_{end_idx}_{mask_id}.tif")
             skimage.io.imsave(filename, mask_ubyte)
+
+
+def estimate_hole_parameters(generator: MaskGenerator, mask_idx: int, n_chunks: Optional[int] = 5, chunk_size: Optional[int] = 4000, bounds: Optional[Tuple[float, float]] = (0.1, 0.66)) -> Tuple[int, float]:
+
+    width_range = 0.05
+
+    chunk_start_idx = random.sample(range(round(generator.image.shape[0] * bounds[0]), round(generator.image.shape[0] * bounds[1])), n_chunks)
+
+    width_bounds = list()
+    density_bounds = list()
+
+    for start_idx in chunk_start_idx:
+        end_idx = start_idx + chunk_size if start_idx + chunk_size <= len(generator.image) else len(generator.image)
+
+        mask = generator.get_masks((start_idx, end_idx))[mask_idx]
+
+        labels = skimage.measure.label(mask, background = False, connectivity = 2)
+        coord_list = hmsm.utils.to_coord_lists(labels)
+
+        logger = logging.getLogger()
+        if logger.isEnabledFor(logging.DEBUG):
+            clr_image = hmsm.utils.image_from_coords(coord_list, mask.shape)
+            filename = os.path.join("debug_data", f"parameter_estimation_detected_components_{start_idx}_{end_idx}.tif")
+            cv2.imwrite(filename, clr_image)
+
+        widths = list()
+        density = list()
+
+        for component in coord_list.values():
+            dims = component.max(axis = 0) - component.min(axis = 0)
+            widths.append(dims[1])
+            density.append(len(component) / (dims[0] * dims[1]))
+
+        widths = np.array(widths)
+        density = np.array(density)
+
+
+        if logger.isEnabledFor(logging.DEBUG):
+            width_filter = np.abs(widths - np.median(widths)) < np.median(widths) * width_range
+            density_filter = np.abs(density - np.median(density)) < 2 * np.std(density)
+            # TODO: Fix this. This is clearly not a well written expression.
+            clr_image = hmsm.utils.image_from_coords(list(itertools.compress(list(coord_list.values()), np.invert(width_filter & density_filter).tolist())), mask.shape)
+            filename = os.path.join("debug_data", f"parameter_estimation_rejected_components_{start_idx}_{end_idx}.tif")
+            cv2.imwrite(filename, clr_image)
+
+            clr_image = hmsm.utils.image_from_coords(list(itertools.compress(list(coord_list.values()), (width_filter & density_filter).tolist())), mask.shape)
+            filename = os.path.join("debug_data", f"parameter_estimation_accepted_components_{start_idx}_{end_idx}.tif")
+            cv2.imwrite(filename, clr_image)
+
+        width_median = np.median(widths)
+        width_bounds.append(np.array((width_median - (width_range * width_median), width_median + (width_range * width_median))))
+
+        density_median = np.median(density)
+        density_std = np.std(density)
+        density_bounds.append(np.array((density_median - density_std, density_median + density_std)))
+
+    density_bounds = np.vstack(density_bounds).mean(axis = 0)
+    width_bounds = np.vstack(width_bounds).mean(axis = 0).round()
+
+    return (tuple(width_bounds), tuple(density_bounds))
+
+def get_initial_alignment_grid(roll_width_mm: int, track_measurements: List) -> np.ndarray:
+    alignment_grid = np.array([list(v.values()) for v in track_measurements])
+    alignment_grid[:,0:2] = alignment_grid[:,0:2] / roll_width_mm
+    return alignment_grid

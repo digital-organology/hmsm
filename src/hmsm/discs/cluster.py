@@ -67,7 +67,7 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
 
     # Convert to coordinates
 
-    coords = hmsm.discs.utils.to_coord_lists(edges)
+    coords = hmsm.utils.to_coord_lists(edges)
 
     # Get the outer edge of the disc for distance calculationsä
     # We currently do this by getting the biggest edge of our edge list (which should always be the outer disc edge)
