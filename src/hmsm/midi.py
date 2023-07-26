@@ -60,7 +60,7 @@ def create_midi(
     # Initialize midi file
 
     midi_file = mido.MidiFile()
-    midi_file.ticks_per_beat = 30
+    midi_file.ticks_per_beat = 960
 
     track = mido.MidiTrack()
     midi_file.tracks.append(track)

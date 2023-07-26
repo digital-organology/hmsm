@@ -51,7 +51,8 @@
             "args": [
                 "roll2midi",
                 "data/5060708_7_cropped.tif",
-                "phonola.mid",
+                "5060708.mid",
+                "-d",
                 "-c", "phonola_solodant"
             ]
         }

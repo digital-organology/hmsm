@@ -1,18 +1,24 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 import os
-os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2,40).__str__()
-import numpy as np
-import hmsm.utils
-import hmsm.discs.utils
-import hmsm.midi
+
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
 import logging
-import cv2
-import sklearn.cluster
 import os
-import scipy.spatial
 from typing import Optional, Tuple
 
-def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset: Optional[int] = 0) -> None:
+import cv2
+import numpy as np
+import scipy.spatial
+import sklearn.cluster
+
+import hmsm.discs.utils
+import hmsm.midi
+import hmsm.utils
+
+
+def process_disc(
+    input_image: np.ndarray, output_path: str, config: dict, offset: Optional[int] = 0
+) -> None:
     """Performs clustering based digitization of an input image
 
     This method will take the provided input image of a cardboard disc and attempt to extract all required information to create a midi file from it.
@@ -29,10 +35,16 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
     logging.info("Preprocessing image")
 
     if "binarization_threshold" in config:
-        logging.debug(f"Using provided value of {config['binarization_threshold']} as binarziation threshold")
-        bin_image = hmsm.utils.binarize_image(input_image, config['binarization_threshold'])
+        logging.debug(
+            f"Using provided value of {config['binarization_threshold']} as binarziation threshold"
+        )
+        bin_image = hmsm.utils.binarize_image(
+            input_image, config["binarization_threshold"]
+        )
     else:
-        logging.debug("No binarization threshold provided, will use Otsu's method to estimate optimal threshold")
+        logging.debug(
+            "No binarization threshold provided, will use Otsu's method to estimate optimal threshold"
+        )
         bin_image = hmsm.utils.binarize_image(input_image)
 
     # Crop to contents
@@ -42,7 +54,9 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
     # Detect edges
 
     if "n_erosions" in config:
-        logging.debug(f"Using provided value of {config['n_erosions']} for edge detection")
+        logging.debug(
+            f"Using provided value of {config['n_erosions']} for edge detection"
+        )
         edges = hmsm.utils.morphological_edge_detection(bin_image, config["n_erosions"])
     else:
         logging.debug("Using default value for number of erosions")
@@ -54,14 +68,25 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
     # The center coordinates the ellipse model returns are named xc and yx, however they are actually row,column indices
     # There are reasons for this behaviour (so I've been told).
     # For all practical purposes we should always be fine by using the coordinates in the order (y,x) (which really is (x,y) but who knows what reality is at this point),
-    # which is also what we get from numpy when calculating indices, 
+    # which is also what we get from numpy when calculating indices,
     # except for one use case, which is the distance calculation from scipy spatial where we have to provide them as (center_x, center_y)
 
-    center_x, center_y, a, b, theta = hmsm.discs.utils.fit_ellipse_to_circumference(bin_image)
+    center_x, center_y, a, b, theta = hmsm.discs.utils.fit_ellipse_to_circumference(
+        bin_image
+    )
 
     # Remove everything that is on the inner disc label
 
-    ellipse_mask = cv2.ellipse(np.zeros((edges.shape[0], edges.shape[1]), np.uint8), (center_y, center_x), (int(a * config["radius_inner"]), int(b * config["radius_inner"])), theta, 0, 360, 1, -1)
+    ellipse_mask = cv2.ellipse(
+        np.zeros((edges.shape[0], edges.shape[1]), np.uint8),
+        (center_y, center_x),
+        (int(a * config["radius_inner"]), int(b * config["radius_inner"])),
+        theta,
+        0,
+        360,
+        1,
+        -1,
+    )
 
     edges[ellipse_mask == 1] = 0
 
@@ -78,7 +103,7 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
     # outer_edge = cv2.ellipse(np.zeros((edges.shape[0], edges.shape[1]), np.uint8), (center_y, center_x), (int(a), int(b)), theta, 0, 360, 1, 1)
     # outer_edge = np.argwhere(outer_edge == 1)
 
-    outer_edge_key = max(coords, key = lambda k: coords[k].shape[0])
+    outer_edge_key = max(coords, key=lambda k: coords[k].shape[0])
     outer_edge = coords[outer_edge_key]
 
     # We can now drop the edge of the outer edge
@@ -87,21 +112,34 @@ def process_disc(input_image: np.ndarray, output_path: str, config: dict, offset
 
     # Note the swapped center coordinates here and here only
 
-    track_mapping = assign_tracks(coords, (center_x, center_y), outer_edge, len(config["track_mapping"]), config["first_track"])
-    
+    track_mapping = assign_tracks(
+        coords,
+        (center_x, center_y),
+        outer_edge,
+        len(config["track_mapping"]),
+        config["first_track"],
+    )
+
     # Calculate the start and end positions of every hole relative to the circumference of the disc
 
     timing_data = calculate_note_timings(coords, (center_y, center_x), offset)
-    
+
     # Combine with track information to create midi
 
-    midi_notes = [config["track_mapping"][str(track)] for track in track_mapping.values()]
+    midi_notes = [
+        config["track_mapping"][str(track)] for track in track_mapping.values()
+    ]
 
-    midi_file = hmsm.midi.create_midi(timing_data[:,1].tolist(), timing_data[:,3].tolist(), midi_notes)
+    midi_file = hmsm.midi.create_midi(
+        timing_data[:, 1].tolist(), timing_data[:, 3].tolist(), midi_notes, 320
+    )
 
     midi_file.save(output_path)
 
-def calculate_note_timings(coords: dict, center: Tuple[int, int], offset: Optional[int] = 0) -> np.ndarray:
+
+def calculate_note_timings(
+    coords: dict, center: Tuple[int, int], offset: Optional[int] = 0
+) -> np.ndarray:
     """Calculate timing information
 
     Given a dictionary of edges (in the form of coordinate lists) this method will calculate the timing information (beginning, end and duration) for the associated edges.
@@ -120,22 +158,22 @@ def calculate_note_timings(coords: dict, center: Tuple[int, int], offset: Option
 
     for edge in coords.values():
         # Shift coordinates by the center of the disc to make them centered around (0,0) and calculate the rotation in degrees
-        degrees = np.arctan2(edge[:,1] - center_y, edge[:,0] - center_x) * 180 / np.pi
+        degrees = np.arctan2(edge[:, 1] - center_y, edge[:, 0] - center_x) * 180 / np.pi
         start_positions.append(degrees.min())
         end_positions.append(degrees.max())
 
     timing_data = np.empty((len(coords), 4), np.float64)
-    timing_data[:,0] = list(coords.keys())
-    timing_data[:,1] = start_positions
-    timing_data[:,2] = end_positions
-    timing_data[:,3] = timing_data[:,2] - timing_data[:,1]
-    timing_data[:,[1,2]] = timing_data[:,[1,2]] + 180
+    timing_data[:, 0] = list(coords.keys())
+    timing_data[:, 1] = start_positions
+    timing_data[:, 2] = end_positions
+    timing_data[:, 3] = timing_data[:, 2] - timing_data[:, 1]
+    timing_data[:, [1, 2]] = timing_data[:, [1, 2]] + 180
 
     if offset is not None and offset > 0:
-        note_timings = timing_data[:,[1,2]]
+        note_timings = timing_data[:, [1, 2]]
         note_timings = note_timings - offset
         note_timings[note_timings < 0] = note_timings[note_timings < 0] + 360
-        timing_data[:,[1,2]] = note_timings
+        timing_data[:, [1, 2]] = note_timings
 
     # At this point we can potentially run into two problems:
     # Notes that sounded over the original start position and have a start time that is higher than their end time after appling the offset
@@ -147,14 +185,14 @@ def calculate_note_timings(coords: dict, center: Tuple[int, int], offset: Option
 
         if row[2] > row[1]:
             return row
-        
+
         # For the first class of notes we just switch around start and end time and recalculate their length
 
         if row[3] > 100:
-            row = row[[0,2,1,3]]
+            row = row[[0, 2, 1, 3]]
             row[3] = row[2] - row[1]
             return row
-        
+
         # For the second class of problematic values the 'correct' solution is a bit less clear
         # We currently drop the part that sounds shorter when split on the starting position, though this might be problematic in some cases
         # However this problem almost certainly stems from an incorrect alignment of the starting position of the disc so we're really just doing damage control here
@@ -167,11 +205,18 @@ def calculate_note_timings(coords: dict, center: Tuple[int, int], offset: Option
         row[3] = row[2] - row[1]
         return row
 
-    timing_data = np.apply_along_axis(sanitize_notes, axis = 1, arr = timing_data)
+    timing_data = np.apply_along_axis(sanitize_notes, axis=1, arr=timing_data)
 
     return timing_data
 
-def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray, n_tracks: int, first_track: float) -> dict:
+
+def assign_tracks(
+    coords: dict,
+    center: Tuple[int, int],
+    outer_edge: np.ndarray,
+    n_tracks: int,
+    first_track: float,
+) -> dict:
     """Find the track assignments for the given edges
 
     This will find the track each edge belongs to by performing a cluster analysis on the calculated distances between the edge and the center and outer edge of the disc.
@@ -193,12 +238,12 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
     # Using relative distances allows us to compensate for some warping and also to
     # use the same paramters for clustering regardless of the actual image size
     distances = list()
-    
+
     for idx, edge in coords.items():
         # This is not super accurate and one might consider using the closest or farthest point of each edge relative to the center
         # however practical testing showed that there is no practical difference in clustering quality
         edge_center = np.mean(edge, 0).astype(np.uint16)
-        edge_center = np.expand_dims(edge_center, axis = 0)
+        edge_center = np.expand_dims(edge_center, axis=0)
 
         dist_inner = scipy.spatial.distance.cdist(edge_center, [center]).min()
         dist_outer = scipy.spatial.distance.cdist(edge_center, outer_edge).min()
@@ -217,43 +262,45 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
     cluster_data = cluster_data.astype(int)
     # Using a bandwidth of 8 has shown to work generally well in empirical testing
     # It should do so across multiple disc sizes as we scale for the disc radius
-    mean_shift = sklearn.cluster.MeanShift(bandwidth = 8)
+    mean_shift = sklearn.cluster.MeanShift(bandwidth=8)
     mean_shift.fit(cluster_data)
     labels = mean_shift.labels_
 
     # Sort classes and create mapping
     assignments = np.column_stack((labels, np.array(distances)))
-    ids = np.unique(assignments[:,0])
-    cluster_means = [np.mean(assignments[assignments[:,0] == i, 1]) for i in ids]
+    ids = np.unique(assignments[:, 0])
+    cluster_means = [np.mean(assignments[assignments[:, 0] == i, 1]) for i in ids]
     cluster_means = np.column_stack((ids, cluster_means))
-    cluster_means = cluster_means[cluster_means[:,1].argsort()]
+    cluster_means = cluster_means[cluster_means[:, 1].argsort()]
 
     # At this point we might have ended up with more clusters than there are tracks on the disc
     # So we merge them back together until we have at max as many clusters as tracks
 
     while cluster_means.shape[0] > n_tracks:
-        dists = np.diff(cluster_means[:,1])
+        dists = np.diff(cluster_means[:, 1])
         merge_to_idx = np.argmin(dists)
-        merge_to = cluster_means[merge_to_idx,0]
-        merge_from = cluster_means[merge_to_idx + 1,0]
+        merge_to = cluster_means[merge_to_idx, 0]
+        merge_from = cluster_means[merge_to_idx + 1, 0]
 
-        assignments[assignments[:,0] == merge_from,0] = merge_to
-        assignments[assignments[:,0] > merge_to,0] = assignments[assignments[:,0] > merge_to,0] - 1
+        assignments[assignments[:, 0] == merge_from, 0] = merge_to
+        assignments[assignments[:, 0] > merge_to, 0] = (
+            assignments[assignments[:, 0] > merge_to, 0] - 1
+        )
 
         labels[labels == merge_from] = merge_to
         labels[labels > merge_to] = labels[labels > merge_to] - 1
 
-        ids = np.unique(assignments[:,0])
-        cluster_means = [np.mean(assignments[assignments[:,0] == i, 1]) for i in ids]
+        ids = np.unique(assignments[:, 0])
+        cluster_means = [np.mean(assignments[assignments[:, 0] == i, 1]) for i in ids]
 
         cluster_means = np.column_stack((ids, cluster_means))
-        cluster_means = cluster_means[cluster_means[:,1].argsort()]
+        cluster_means = cluster_means[cluster_means[:, 1].argsort()]
 
     # Change the labels so they are sorted from the inside of the disc to the outside
 
     copy = np.zeros_like(labels)
     for cluster in np.unique(labels):
-        copy[labels == cluster] = np.argwhere(cluster_means[:,0] == cluster)[0][0]
+        copy[labels == cluster] = np.argwhere(cluster_means[:, 0] == cluster)[0][0]
 
     labels = copy + 1
 
@@ -264,23 +311,27 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
 
     # Calculate average track distance
 
-    track_distances = np.column_stack((np.arange(1, cluster_means.shape[0] + 1), cluster_means[:,1]))
+    track_distances = np.column_stack(
+        (np.arange(1, cluster_means.shape[0] + 1), cluster_means[:, 1])
+    )
 
     track_distances = np.insert(track_distances, 0, np.array((0, first_track)), 0)
-    
-    track_distances = np.column_stack((track_distances[:,0], np.append(0, np.diff(track_distances[:,1], axis = 0))))
 
-    median_track_width = np.median(track_distances, axis = 0)[1]
+    track_distances = np.column_stack(
+        (track_distances[:, 0], np.append(0, np.diff(track_distances[:, 1], axis=0)))
+    )
+
+    median_track_width = np.median(track_distances, axis=0)[1]
 
     # Shift tracks until we have the correct number of tracks
 
-    while np.max(track_distances, axis = 0)[0] < n_tracks:
-        max_row_idx = np.argmax(track_distances, axis = 0)[1]
+    while np.max(track_distances, axis=0)[0] < n_tracks:
+        max_row_idx = np.argmax(track_distances, axis=0)[1]
         max_row = track_distances[max_row_idx]
 
         if round((max_row[1] - median_track_width) / median_track_width) < 1:
             break
-        
+
         track_distances[max_row_idx][1] = max_row[1] - median_track_width
 
         # Increment all rows after this one up
@@ -292,15 +343,18 @@ def assign_tracks(coords: dict, center: Tuple[int, int], outer_edge: np.ndarray,
 
     copy = assignments.copy()
 
-    for track in np.unique(assignments[:,1]):
-        copy[:,1][assignments[:,1] == track] = track_distances[int(track), 0]
+    for track in np.unique(assignments[:, 1]):
+        copy[:, 1][assignments[:, 1] == track] = track_distances[int(track), 0]
 
-    assignments = dict(zip(copy[:,0], copy[:,1]))
+    assignments = dict(zip(copy[:, 0], copy[:, 1]))
 
     if logger.isEnabledFor(logging.DEBUG):
         plot_data = dict(zip(assignments.values(), coords.values()))
-        debug_image = hmsm.utils.image_from_coords(list(coords.values()), labels = list(assignments.values()))
-        cv2.imwrite(os.path.join("debug_data", "tracks_after_correction.jpg"), debug_image)
+        debug_image = hmsm.utils.image_from_coords(
+            list(coords.values()), labels=list(assignments.values())
+        )
+        cv2.imwrite(
+            os.path.join("debug_data", "tracks_after_correction.jpg"), debug_image
+        )
 
     return assignments
-

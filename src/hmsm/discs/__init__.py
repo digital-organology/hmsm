@@ -1,11 +1,19 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
 import logging
-import hmsm.utils
-import hmsm.discs.cluster
 from typing import Optional
 
-def process_disc(input_path: str, output_path: str, method: str, config: dict, offset: Optional[int] = 0) -> None:
+import hmsm.discs.cluster
+import hmsm.utils
+
+
+def process_disc(
+    input_path: str,
+    output_path: str,
+    method: str,
+    config: dict,
+    offset: Optional[int] = 0,
+) -> None:
     """Perform image based midi generation on a disc shaped medium
 
     This is a wrapper method that will read the input image and then dispatch the appropriate processing method.
@@ -23,5 +31,6 @@ def process_disc(input_path: str, output_path: str, method: str, config: dict, o
     logging.info("Input image read successfully")
 
     if method == "cluster":
-        hmsm.discs.cluster.process_disc(input, output_path, config = config, offset = offset)
-
+        hmsm.discs.cluster.process_disc(
+            input, output_path, config=config, offset=offset
+        )

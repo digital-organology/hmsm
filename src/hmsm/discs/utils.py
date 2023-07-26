@@ -1,20 +1,23 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
 import os
-os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2,40).__str__()
+
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
 import logging
-import numpy as np
-import cv2
-import numpy as np
-import logging
-import hmsm.utils
 import os
-import skimage.measure
-import hmsm.utils
-import scipy.spatial
 from typing import Optional, Tuple
 
-def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binarize: Optional[bool] = False) -> np.ndarray:
+import cv2
+import numpy as np
+import scipy.spatial
+import skimage.measure
+
+import hmsm.utils
+
+
+def transform_to_rectangle(
+    image: np.ndarray, offset: Optional[int] = 0, binarize: Optional[bool] = False
+) -> np.ndarray:
     """Transforms an image of a circular music storage medium to the shape of a rectangular one
 
     Args:
@@ -37,7 +40,16 @@ def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binariz
     center_x, center_y, a, b, theta = fit_ellipse_to_circumference(image)
 
     # Create a mask for all pixels that are within the disc
-    ellipse_mask = cv2.ellipse(np.zeros((image.shape[0], image.shape[1]), np.uint8), (center_x, center_y), (int(a), int(b)), theta, 0, 360, 1, -1)
+    ellipse_mask = cv2.ellipse(
+        np.zeros((image.shape[0], image.shape[1]), np.uint8),
+        (center_x, center_y),
+        (int(a), int(b)),
+        theta,
+        0,
+        360,
+        1,
+        -1,
+    )
 
     # Right now the disc background is filled while the holes are empty
     # This should be fine, but does significantly increase computational demand
@@ -56,11 +68,10 @@ def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binariz
 
     coords = coords - np.array([center_x, center_y])
 
-
     # Calculate position in degrees
 
-    degrees = np.arctan2(coords[:,1], coords[:,0]) * 180 / np.pi
-    degrees = ((np.round(degrees, decimals = 1) + 180) * 10).astype(np.int16)
+    degrees = np.arctan2(coords[:, 1], coords[:, 0]) * 180 / np.pi
+    degrees = ((np.round(degrees, decimals=1) + 180) * 10).astype(np.int16)
 
     # Apply offset if applicable
 
@@ -73,13 +84,19 @@ def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binariz
 
     # Calculate distances
 
-    dists = np.round(scipy.spatial.distance.cdist(np.array([[0, 0]]), coords)[0], decimals = 0).astype(np.uint16)
+    dists = np.round(
+        scipy.spatial.distance.cdist(np.array([[0, 0]]), coords)[0], decimals=0
+    ).astype(np.uint16)
 
     # Build 2d image
 
     logging.info("Applying calculated transformations and creating output image")
 
-    dims = (3601, dists.max() + 10) if values.ndim == 1 else (3601, dists.max() + 10, values.shape[1])
+    dims = (
+        (3601, dists.max() + 10)
+        if values.ndim == 1
+        else (3601, dists.max() + 10, values.shape[1])
+    )
     image_rect = np.zeros(dims, np.uint8)
     image_rect[degrees, dists] = values
 
@@ -91,6 +108,7 @@ def transform_to_rectangle(image: np.ndarray, offset: Optional[int] = 0, binariz
     interpolated_image = hmsm.utils.interpolate_missing_pixels(image_rect, mask)
 
     return interpolated_image
+
 
 def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int, float]:
     """Fit ellipse equation to circumference of disc
@@ -105,12 +123,12 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
     """
     if image.ndim == 3 or np.unique(image).size > 2:
         image = hmsm.utils.binarize_image(image)
-    
+
     # Label the image to find the outer edge of the disc
 
     edges = hmsm.utils.morphological_edge_detection(image)
 
-    labels = skimage.measure.label(edges, background = 0, connectivity = 2)
+    labels = skimage.measure.label(edges, background=0, connectivity=2)
 
     # We can generally assume the outer edge to be the first label, though we might implement additional methods for messier images in the future
 

@@ -45,6 +45,7 @@ repository = "https://github.com/digital-organology/hmsm"
 disc2roll = "hmsm.cli:disc2roll"
 disc2midi = "hmsm.cli:disc2midi"
 roll2masks = "hmsm.cli:roll2masks"
+roll2midi = "hmsm.cli:roll2midi"
 
 [tools.setuptools.packages.find]
 exclude = ["assets*", "docs*"]
