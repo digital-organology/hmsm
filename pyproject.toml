@@ -37,6 +37,9 @@ dependencies = [
     "scipy"
 ]
 
+[project.optional-dependencies]
+midi2disc = ["cairosvg"]
+
 [project.urls]
 homepage = "https://organology.uni-leipzig.de/"
 repository = "https://github.com/digital-organology/hmsm"
@@ -45,6 +48,7 @@ repository = "https://github.com/digital-organology/hmsm"
 disc2roll = "hmsm.cli:disc2roll"
 disc2midi = "hmsm.cli:disc2midi"
 roll2masks = "hmsm.cli:roll2masks"
+midi2disc = "hmsm.cli:midi2disc"
 
 [tools.setuptools.packages.find]
 exclude = ["assets*", "docs*"]

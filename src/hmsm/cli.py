@@ -6,7 +6,8 @@ import argparse
 import traceback
 import hmsm.discs.utils
 import hmsm.discs
-import hmsm.rolls.utils
+# import hmsm.rolls.utils
+import hmsm.discs.generator
 import hmsm.config
 import skimage.io
 import pathlib
@@ -100,3 +101,27 @@ def roll2masks(argv = sys.argv):
     )
 
     hmsm.rolls.utils.create_chunk_masks(args.input, args.chunk_size, args.n_clusters)
+
+def midi2disc(argv = sys.argv):
+    """CLI entrypoint for disc image creation from a midi file
+
+    Args:
+        argv (list, optional): Command line arguments. Defaults to sys.argv.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", help = "Input midi file")
+    parser.add_argument("output", help = "Output image file")
+    parser.add_argument("-t", "--type", dest = "type", default = "ariston_24", const = "ariston_24", nargs= "?", type = str, help = "Type of disc to create")
+    parser.add_argument("-s", "--size", dest = "size", default = 4000, const = 4000, nargs= "?", type = int, help = "Diameter of the disc to create (in pixels)")
+    parser.add_argument("-l", "--logo-file", dest = "logo_file", default = None, const = None, nargs= "?", type = str, help = "Logo file to apply to the disc")
+    parser.add_argument("-n", "--name", dest = "name", default = None, const = None, nargs= "?", type = str, help = "Name to use for the disc title.")
+    parser.add_argument("-d", "--debug", action = "store_true", help = "Enable debug output.")   
+    parser.set_defaults(type = "ariston_24", size = 4000, logo_file = None, name = None, debug = False)                                       
+    args = parser.parse_args(argv[1:])
+
+    logging.basicConfig(
+        level = logging.DEBUG if args.debug else logging.INFO,
+        format = "%(asctime)s [%(levelname)s]: %(message)s"
+    )
+
+    hmsm.discs.generator.generate_disc(args.input, args.output, args.size, args.type, args.name, args.logo_file)
