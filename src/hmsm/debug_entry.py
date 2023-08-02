@@ -18,6 +18,8 @@ def main(argv=sys.argv):
         hmsm.cli.roll2masks(argv)
     elif method == "roll2midi":
         hmsm.cli.roll2midi(argv)
+    elif method == "midi2disc":
+        hmsm.cli.midi2disc(argv)
 
 
 if __name__ == "__main__":
