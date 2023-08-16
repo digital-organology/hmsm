@@ -1,12 +1,15 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
 import functools
+import itertools
 import logging
 import os
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import scipy.signal
+import scipy.sparse.csgraph
+import scipy.spatial.distance
 import skimage.io
 import skimage.morphology
 
@@ -78,19 +81,30 @@ def process_roll(
     )
 
     note_data = list()
+    dynamics_line = list()
 
     for bounds, masks in iter(generator):
         logging.info(f"Processing chunk from {bounds[0]} to {bounds[1]}")
+
+        left_edge, right_edge = _get_roll_edges(masks[-1])
+
         notes, alignment_grid = extract_note_data(
-            masks[mask_idx], masks[-1], alignment_grid, width_bounds, density_bounds
+            masks[mask_idx],
+            (left_edge, right_edge),
+            alignment_grid,
+            width_bounds,
+            density_bounds,
         )
 
-        if notes is None:
-            continue
+        if notes is not None:
+            notes[:, 0:2] = notes[:, 0:2] + bounds[0]
+            note_data.append(notes)
 
-        notes[:, 0:2] = notes[:, 0:2] + bounds[0]
-        note_data.append(notes)
-
+        dynamics_line_nodes = process_annotations(
+            masks[1 - mask_idx], (left_edge, right_edge), bounds
+        )
+        if dynamics_line_nodes is not None:
+            dynamics_line.append(dynamics_line_nodes)
     # Currently superfluous
     # note_data = list(filter(lambda x: x is not None, note_data))
 
@@ -117,6 +131,12 @@ def process_roll(
         filename = os.path.join("debug_data", "note_data_processed.csv")
         debug_array = np.hstack([note_start, note_duration, midi_tone])
         np.savetxt(filename, debug_array, delimiter=",")
+
+    logging.info("Processing dynamics line")
+
+    dynamics_line = np.vstack(dynamics_line)
+
+    dynamics_line = process_dynamics_line(dynamics_line)
 
     logging.info("Creating midi data")
 
@@ -186,9 +206,187 @@ def merge_notes(notes: np.ndarray) -> np.ndarray:
     return notes_merged
 
 
+def process_dynamics_line(nodes: List[np.ndarray]) -> np.ndarray:
+    nodes = nodes.astype(np.uint64)
+    line_coords = list()
+
+    for i in range(len(nodes) - 1):
+        y = np.arange(nodes[i, 0], nodes[i + 1, 0])
+
+        m = (int(nodes[i, 1]) - int(nodes[i + 1, 1])) / (
+            int(nodes[i, 0]) - int(nodes[i + 1, 0])
+        )
+        b = (
+            (int(nodes[i, 0]) * int(nodes[i + 1, 1]))
+            - (int(nodes[i + 1, 0]) * int(nodes[i, 1]))
+        ) / (int(nodes[i, 0]) - int(nodes[i + 1, 0]))
+
+        line_coords.append(np.column_stack((y, b + (y * m))))
+
+    line_coords = np.vstack(line_coords)
+
+    return line_coords
+
+
+def process_annotations(
+    annotation_mask: np.ndarray,
+    roll_edges: Tuple[np.ndarray, np.ndarray],
+    bounds: Tuple[int, int],
+) -> np.ndarray:
+    left_edge, right_edge = roll_edges
+    labels = skimage.measure.label(annotation_mask, background=False, connectivity=2)
+    components = list(hmsm.utils.to_coord_lists(labels).values())
+
+    dynamics_line_nodes = _get_dynamics_line(components, bounds)
+
+    return dynamics_line_nodes
+
+    # dynamics_line = list(
+    #     filter(
+    #         functools.partial(
+    #             _filter_component,
+    #             width_bounds=(15, 45),
+    #             height_to_width_ratio=(0.5, 2),
+    #         ),
+    #         components,
+    #     )
+    # )
+
+    # node_centers = np.array([np.mean(comp, axis=0) for comp in dynamics_line])
+
+    # dists = scipy.spatial.distance.cdist(node_centers, node_centers)
+    # dists[dists == 0] = float("inf")
+
+    # distance_threshold = 200
+
+    # adj_matrix = dists < distance_threshold
+
+    # n_components, labels = scipy.sparse.csgraph.connected_components(
+    #     adj_matrix, False, return_labels=True
+    # )
+
+    # assignments = np.zeros(len(node_centers), np.uint8)
+
+    # # Do this until all elements are assigned
+    # while np.any(assignments == 0):
+    #     cluster_id = np.max(assignments) + 1
+    #     # Select the unassigned element that is at the top most point of the image as the start point
+    #     current_element_idx = node_centers[assignments == 0, 0].argmin(axis=0)
+    #     current_element = node_centers[current_element_idx]
+    #     assignments[current_element_idx] = cluster_id
+
+    #     # Find the next closest element to the starting element
+    #     next_element = dists[assignments == 0, current_element_idx].argmin()
+
+    #     # TODO: Infere the threshold from data
+    #     while (
+    #         dists[assignments == 0, current_element_idx][next_element]
+    #         < distance_threshold
+    #     ):
+    #         if (
+    #             current_element[0] - node_centers[assignments == 0][next_element][0]
+    #             > 10
+    #         ):
+    #             # Elements should generally be located below the current one, we only tolerate a very small upwards tilt
+    #             # There should be a better way to do this...
+    #             values = dists[assignments == 0, current_element_idx]
+    #             values[next_element] = float("inf")
+    #             dists[assignments == 0, current_element_idx] = values
+    #             # Go to next closest element
+    #             next_element = dists[assignments == 0, current_element_idx].argmin()
+    #             continue
+
+    #         current_element_idx = next_element
+    #         current_element = node_centers[assignments == 0][current_element_idx]
+
+    #         new_assignments = assignments[assignments == 0]
+    #         new_assignments[current_element_idx] = cluster_id
+    #         assignments[assignments == 0] = new_assignments
+
+    #         next_element = dists[assignments == 0, current_element_idx].argmin()
+
+    # min_distances = np.min(dists, axis=0)
+    # median = np.median(min_distances)
+    # dists = np.delete(dists, min_distances > median * 1.5, axis=0)
+    # dists = np.delete(dists, min_distances > median * 1.5, axis=1)
+
+    # dynamics_line = list(
+    #     itertools.compress(dynamics_line, (min_distances <= median * 1.5).tolist())
+    # )
+
+    # clr_img = hmsm.utils.image_from_coords(dynamics_line, annotation_mask.shape)
+    # filename = os.path.join("masks", f"dynamics_line_{bounds[0]}_{bounds[1]}.tif")
+
+    # skimage.io.imsave(filename, clr_img)
+    # cluster_distances = dists[labels == cluster_id, :][:, labels == cluster_id]
+
+    # dists = dists[min_distances < median * 1.5, min_distances < median * 1.5]
+    # pass
+
+
+def _get_dynamics_line(components: np.ndarray, bounds: Tuple[int, int]) -> np.ndarray:
+    dynamics_line = list(
+        filter(
+            functools.partial(
+                _filter_component,
+                width_bounds=(15, 45),
+                height_to_width_ratio=(0.5, 2),
+            ),
+            components,
+        )
+    )
+
+    node_centers = np.array([np.mean(comp, axis=0) for comp in dynamics_line])
+
+    dists = scipy.spatial.distance.cdist(node_centers, node_centers)
+    dists[dists == 0] = float("inf")
+
+    distance_threshold = 200
+
+    adj_matrix = dists < distance_threshold
+
+    n_components, labels = scipy.sparse.csgraph.connected_components(
+        adj_matrix, False, return_labels=True
+    )
+
+    component_sizes = np.bincount(labels)
+
+    min_components = (bounds[1] - bounds[0]) / 400
+
+    if np.max(component_sizes) < min_components or n_components > 10:
+        return None
+
+    cluster_id = np.argmax(component_sizes)
+    cluster_distances = dists[labels == cluster_id, :][:, labels == cluster_id].copy()
+    cluster_distances[cluster_distances == float("inf")] = 0
+    cluster_nodes = node_centers[labels == cluster_id]
+
+    first_node = cluster_nodes[:, 0].argmin()
+    last_node = cluster_nodes[:, 0].argmax()
+
+    path_distances, path_predecessors = scipy.sparse.csgraph.shortest_path(
+        cluster_distances.astype(np.uint64), directed=False, return_predecessors=True
+    )
+
+    path = list([last_node])
+    current_node = last_node
+
+    while path_predecessors[first_node, current_node] != -9999:
+        path.append(path_predecessors[first_node, current_node])
+        current_node = path_predecessors[first_node, current_node]
+
+    path = path[::-1]
+
+    cluster_nodes = cluster_nodes[path]
+
+    cluster_nodes[:, 0] = cluster_nodes[:, 0] + bounds[0]
+
+    return cluster_nodes
+
+
 def extract_note_data(
     note_mask: np.ndarray,
-    binary_mask: np.ndarray,
+    roll_edges: Tuple[np.ndarray, np.ndarray],
     alignment_grid: np.ndarray,
     width_bounds: Tuple[float, float],
     density_bounds: Tuple[float, float],
@@ -199,7 +397,7 @@ def extract_note_data(
 
     Args:
         note_mask (np.ndarray): Mask that contains the holes on a piano roll
-        binary_mask (np.ndarray): Mask that is binarized to be True where the piano roll is and false outside of it, used for detecting the edges of the roll
+        roll_edges (Tuple[np.ndarray, np.ndarray]): Arrays containing the the edge of the roll along the entire subchunk.
         alignment_grid (np.ndarray): Array containing information about the location of all tracks on the given piano roll
         width_bounds (Tuple[float, float]): Bounds within which the width of a given component must be to be considered as a hole in the piano roll
         density_bounds (Tuple[float, float]): Bounds within which the density of a given component must be to be considered as a hole in the piano roll
@@ -225,7 +423,7 @@ def extract_note_data(
     if len(components) == 0:
         return (None, alignment_grid)
 
-    left_edge, right_edge = _get_roll_edges(binary_mask)
+    left_edge, right_edge = roll_edges
 
     note_data = list()
 
@@ -296,8 +494,9 @@ def _get_roll_edges(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
 def _filter_component(
     component: np.ndarray,
-    width_bounds: Tuple[float, float],
-    density_bounds: Tuple[float, float],
+    width_bounds: Optional[Tuple[float, float]] = None,
+    density_bounds: Optional[Tuple[float, float]] = None,
+    height_to_width_ratio: Optional[Tuple[float, float]] = None,
 ) -> bool:
     """Checks if the given compoennt fits within the given bounds
 
@@ -311,12 +510,20 @@ def _filter_component(
     """
     dims = component.max(axis=0) - component.min(axis=0)
 
-    if dims[1] < width_bounds[0] or dims[1] > width_bounds[1]:
+    if width_bounds is not None and (
+        dims[1] < width_bounds[0] or dims[1] > width_bounds[1]
+    ):
         return False
 
-    density = len(component) / (dims[0] * dims[1])
+    if density_bounds is not None:
+        density = len(component) / (dims[0] * dims[1])
 
-    if density < density_bounds[0] or density > density_bounds[1]:
-        return False
+        if density < density_bounds[0] or density > density_bounds[1]:
+            return False
+
+    if height_to_width_ratio is not None:
+        ratio = dims[0] / dims[1]
+        if ratio < height_to_width_ratio[0] or ratio > height_to_width_ratio[1]:
+            return False
 
     return True
