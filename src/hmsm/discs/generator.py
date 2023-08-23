@@ -342,13 +342,20 @@ def _put_logos(canvas: np.ndarray, logos_file: str, radius: int, center: Tuple[i
 
     canvas = cv2.rectangle(canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2)
 
-    # TODO: Use proper alpha blending
+    alpha = logo_mat[:,:,3].astype(float) / 255
+    alpha = cv2.merge((alpha, alpha, alpha))
 
-    logo_chunk = canvas[top_left_x:bottom_right_x,top_left_y:bottom_right_y,:]
+    fg = logo_mat[:,:,0:3].astype(float)
 
-    logo_chunk[logo_mat[:,:,3] > 0] = logo_mat[logo_mat[:,:,3] > 0][:,0:3]
+    fg = cv2.multiply(alpha, fg)
 
-    canvas[top_left_x:bottom_right_x,top_left_y:bottom_right_y,:] = logo_chunk
+    bg = canvas[top_left_x:bottom_right_x,top_left_y:bottom_right_y,:].astype(float)
+    bg = cv2.multiply(1 - alpha, bg)
+
+    blended = cv2.add(fg, bg).astype(np.uint8)
+
+
+    canvas[top_left_x:bottom_right_x,top_left_y:bottom_right_y,:] = blended
 
     return canvas
 
