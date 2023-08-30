@@ -42,7 +42,7 @@
                 "-t", "ariston_24",
                 "-s", "4000",
                 "-l", "logos.svg",
-                "-n", "Sweet Dreams",
+                "-n", "Eurythmics<br>Sweet Dreams",
                 "-d",
                 "eurythmics.mid",
                 "sweet_dreams_new.png"

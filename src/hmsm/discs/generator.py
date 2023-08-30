@@ -135,7 +135,7 @@ def _generate_ariston_24_base_disc(size: int, title: Optional[str], logo_file: O
         canvas = _put_title(canvas, title, printing_color, title_radius, (center_x, center_y))
 
     if not logo_file is None:
-        logging.info("Drawing logo file (sorry no alpha blending currently)")
+        logging.info("Drawing logo file")
         canvas = _put_logos(canvas, logo_file, title_radius, (center_x, center_y), printing_color)
 
     logging.info("Adding alpha channel to the image")
@@ -400,18 +400,42 @@ def _put_title(canvas: np.ndarray, title: str, color: Tuple[int, int, int], radi
     width = bottom_right_y - top_left_y
     height = bottom_right_x - top_left_x
 
+    if "<br>" in title:
+        title = title.split("<br>")
+
     font_scale = _fit_text_in_rectangle(title, width, height)
 
     # Get text dimensions to center
 
-    text_width, text_height = cv2.getTextSize(title, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+    if isinstance(title, list):
+        heights = list()
+        widths = list()
 
-    title_x = round(bottom_right_x - ((height - text_height) / 2))
-    title_y = round(((width - text_width) / 2) + top_left_y)
+        for title_line in title:
+            text_width, text_height = cv2.getTextSize(title_line, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+            heights.append(text_height)
+            widths.append(text_width)
 
-    canvas = cv2.rectangle(canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2)
+        vertical_padding = (height - sum(heights)) / (len(title) + 1)
+        vertical_offset = top_left_x + vertical_padding
 
-    canvas = cv2.putText(canvas, title, (title_y, title_x), cv2.FONT_HERSHEY_DUPLEX, font_scale, color, 3)
+        canvas = cv2.rectangle(canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2)
+
+        for title_line in title:
+            text_width, text_height = cv2.getTextSize(title_line, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+            line_x = round(vertical_offset + text_height)
+            vertical_offset = line_x + vertical_padding
+            line_y = round(((width - text_width) / 2) + top_left_y)
+            canvas = cv2.putText(canvas, title_line, (line_y, line_x), cv2.FONT_HERSHEY_DUPLEX, font_scale, color, 3)
+    else:
+        text_width, text_height = cv2.getTextSize(title, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+
+        title_x = round(bottom_right_x - ((height - text_height) / 2))
+        title_y = round(((width - text_width) / 2) + top_left_y)
+
+        canvas = cv2.rectangle(canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2)
+
+        canvas = cv2.putText(canvas, title, (title_y, title_x), cv2.FONT_HERSHEY_DUPLEX, font_scale, color, 3)
 
     return canvas
 
@@ -486,7 +510,7 @@ def _fit_text_in_width(text: str, width: int) -> float:
     
     return -1
 
-def _fit_text_in_rectangle(text: str, width: int, height: int) -> float:
+def _fit_text_in_rectangle(text: str|List, width: int, height: int) -> float:
     """Find the biggest font scale that fits the given text within the given rectangle
 
     Args:
@@ -498,8 +522,24 @@ def _fit_text_in_rectangle(text: str, width: int, height: int) -> float:
         float: Biggest font_scale that will fit given text in the given rectangle
     """
     for font_scale in np.flip(np.arange(0.1, (width / 100), 0.1)):
-        text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
-        if text_size[0] < width and text_size[1] < height:
+        if isinstance(text, list):
+            heights = list()
+            widths = list()
+            for text_line in text:
+                text_size = cv2.getTextSize(text_line, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+                heights.append(text_size[1])
+                widths.append(text_size[0])
+
+            if not all(text_width < width for text_width in widths):
+                continue
+
+            if not (sum(heights) + (len(heights) * 10)) < height:
+                continue
+
             return font_scale
+        else:
+            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+            if text_size[0] < width and text_size[1] < height:
+                return font_scale
     
-    return -1
+    raise ValueError("Could not fit text to scale, is the printable area large enough?")
