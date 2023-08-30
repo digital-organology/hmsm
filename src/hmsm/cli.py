@@ -114,7 +114,7 @@ def midi2disc(argv = sys.argv):
     parser.add_argument("-t", "--type", dest = "type", default = "ariston_24", const = "ariston_24", nargs= "?", type = str, help = "Type of disc to create")
     parser.add_argument("-s", "--size", dest = "size", default = 4000, const = 4000, nargs= "?", type = int, help = "Diameter of the disc to create (in pixels)")
     parser.add_argument("-l", "--logo-file", dest = "logo_file", default = None, const = None, nargs= "?", type = str, help = "Logo file to apply to the disc")
-    parser.add_argument("-n", "--name", dest = "name", default = None, const = None, nargs= "?", type = str, help = "Name to use for the disc title.")
+    parser.add_argument("-n", "--name", dest = "name", default = None, const = None, nargs= "?", type = str, help = "Name to use for the disc title. Newlines are indicated with `<br>`.")
     parser.add_argument("-d", "--debug", action = "store_true", help = "Enable debug output.")   
     parser.set_defaults(type = "ariston_24", size = 4000, logo_file = None, name = None, debug = False)                                       
     args = parser.parse_args(argv[1:])
