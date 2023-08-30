@@ -15,7 +15,7 @@ except ImportError:
 else:
     _has_cairo = True
 
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 def generate_disc(midi_path: str, image_path: str, size: int, type: str, name: Optional[str], logo_file: Optional[str]) -> None:
     """Generate an image from a midi file
@@ -38,13 +38,13 @@ def generate_disc(midi_path: str, image_path: str, size: int, type: str, name: O
     else:
         raise ValueError("Disc type {type} is not (currently) supported by this method")
     
-    logging.info("Reading and processing midi file")
-
-    note_data = _midi_to_absolute_timings(midi_path)
-
     logging.info("Getting configuration data")
 
     config = _get_config(type)
+
+    logging.info("Reading and processing midi file")
+
+    note_data = _midi_to_absolute_timings(midi_path, list(config["track_mapping"].keys()))
 
     logging.info("Drawing holes on disc")
 
@@ -193,6 +193,12 @@ def _draw_notes(canvas: np.ndarray, note_data: np.ndarray, config: dict, radius:
     # Change midi tones to track index
     note_data[:,0] = np.array([config["track_mapping"][val] for val in note_data[:,0]])
 
+    if np.any(note_data[note_data[:,1] < 0]):
+        broken_notes = note_data[note_data[:,1] < 0]
+        broken_notes[:,1] = broken_notes[:,1] + 360
+        note_data[note_data[:,1] < 0] = broken_notes
+
+
     # Draw these annoying things
     for note in note_data:
         min_radius = round((config["note_start"] * radius) + ((note[0] - 1) * note_width) + ((note[0] - 1) * padding_width))
@@ -203,7 +209,7 @@ def _draw_notes(canvas: np.ndarray, note_data: np.ndarray, config: dict, radius:
     return canvas
 
 
-def _midi_to_absolute_timings(midi_file: str) -> np.ndarray:
+def _midi_to_absolute_timings(midi_file: str, allowed_notes: Optional[List[int]]) -> np.ndarray:
     """Reads a midi file and converts the timings to absolute units
 
     Will also handle conversion and scaling of the timing data.
@@ -226,14 +232,25 @@ def _midi_to_absolute_timings(midi_file: str) -> np.ndarray:
     message_types = list()
     message_notes = list()
     message_times = list()
+    skipped_notes = 0
 
     for msg in midi_file.tracks[0]:
         if isinstance(msg, mido.midifiles.meta.MetaMessage):
             continue
 
+        if not (msg.type == "note_on" or msg.type == "note_off"):
+            continue
+
+        if not msg.note in allowed_notes:
+            skipped_notes += 1
+            continue
+
         message_types.append(msg.type)
         message_notes.append(msg.note)
         message_times.append(msg.time)
+
+    if not skipped_notes == 0:
+        logging.warning(f"Skipped {skipped_notes} notes because they contained tones not contained in the format")
 
     message_types = np.array(message_types)
     message_notes = np.array(message_notes)

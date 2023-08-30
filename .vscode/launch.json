@@ -30,6 +30,23 @@
                 "assets/5070081_11.JPG",
                 "roll.jpg"
             ]
+        },
+        {
+            "name": "midi2disc",
+            "type": "python",
+            "request": "launch",
+            "module": "hmsm.debug_entry",
+            "justMyCode": true,
+            "args": [
+                "midi2disc",
+                "-t", "ariston_24",
+                "-s", "4000",
+                "-l", "logos.svg",
+                "-n", "Sweet Dreams",
+                "-d",
+                "eurythmics.mid",
+                "sweet_dreams_new.png"
+            ]
         }
     ]
 }
