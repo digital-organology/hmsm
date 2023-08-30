@@ -1,13 +1,15 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
-import cv2
-import numpy as np
-import vnoise
-import math
-import skimage.morphology
-import os
-import mido
 import logging
+import math
+import os
+
+import cv2
+import mido
+import numpy as np
+import skimage.morphology
+import vnoise
+
 try:
     import cairosvg
 except ImportError:
@@ -15,7 +17,8 @@ except ImportError:
 else:
     _has_cairo = True
 
-from typing import Tuple, Optional, List
+from typing import List, Optional, Tuple
+
 
 def generate_disc(midi_path: str, image_path: str, size: int, type: str, name: Optional[str], logo_file: Optional[str]) -> None:
     """Generate an image from a midi file
