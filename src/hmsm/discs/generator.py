@@ -511,13 +511,13 @@ def _fit_text_in_width(text: str, width: int) -> float:
         if text_width < width:
             return font_scale
     
-    return -1
+    raise ValueError("Could not fit text to scale, is the printable area large enough?")
 
 def _fit_text_in_rectangle(text: str|List, width: int, height: int) -> float:
     """Find the biggest font scale that fits the given text within the given rectangle
 
     Args:
-        text (str): Text to fit
+        text (str|List): Text to fit
         width (int): Width to fit the text within
         height (int): Height to fit the text within
 
