@@ -1,6 +1,6 @@
 # Installation
 
-Though it is not generally required we strongly encourage you to use a conda environment for setting up this software. Especially as it is currently under active development and depenencies might change rapidly which could conflict with other installed python packages.
+Though it is not generally required we strongly encourage you to use a conda environment for setting up this software, especially as it is currently under active development and dependencies might change rapidly which could conflict with other installed python packages.
 
 To do this follow the guide over on the conda homepage [here](https://conda.io/projects/conda/en/latest/user-guide/install/index.html) (a miniconda installation will be sufficient).
 After you installed conda you can create a conda environment like follows (we currently test our software against Python 3.11):
