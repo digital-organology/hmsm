@@ -58,3 +58,13 @@ docs/_build/
 
 *.tif
 *.tiff
+
+# Local debug data
+
+data/*
+debug_data/*
+*.csv
+
+# Just macOS things..
+
+.DS_Store
