@@ -1,13 +1,15 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
-import cv2
-import numpy as np
-import vnoise
-import math
-import skimage.morphology
-import os
-import mido
 import logging
+import math
+import os
+
+import cv2
+import mido
+import numpy as np
+import skimage.morphology
+import vnoise
+
 try:
     import cairosvg
 except ImportError:
@@ -15,9 +17,17 @@ except ImportError:
 else:
     _has_cairo = True
 
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
-def generate_disc(midi_path: str, image_path: str, size: int, type: str, name: Optional[str], logo_file: Optional[str]) -> None:
+
+def generate_disc(
+    midi_path: str,
+    image_path: str,
+    size: int,
+    type: str,
+    name: Optional[str],
+    logo_file: Optional[str],
+) -> None:
     """Generate an image from a midi file
 
     Method to convert a midi file into an image of a corresponding cardboard disc
@@ -37,7 +47,7 @@ def generate_disc(midi_path: str, image_path: str, size: int, type: str, name: O
         disc_image, center = _generate_ariston_24_base_disc(size, name, logo_file)
     else:
         raise ValueError("Disc type {type} is not (currently) supported by this method")
-    
+
     logging.info("Reading and processing midi file")
 
     note_data = _midi_to_absolute_timings(midi_path)
@@ -57,7 +67,10 @@ def generate_disc(midi_path: str, image_path: str, size: int, type: str, name: O
 
     logging.info("Done")
 
-def _generate_ariston_24_base_disc(size: int, title: Optional[str], logo_file: Optional[str]) -> Tuple[np.ndarray, Tuple[int, int]]:
+
+def _generate_ariston_24_base_disc(
+    size: int, title: Optional[str], logo_file: Optional[str]
+) -> Tuple[np.ndarray, Tuple[int, int]]:
     """Generate base image of an ariston brand cardboard disc with 24 tracks
 
     This will also draw some decorations and (if provided) the title of the disc as well as a logo file on the disc.
@@ -86,38 +99,52 @@ def _generate_ariston_24_base_disc(size: int, title: Optional[str], logo_file: O
     # Get a mask of the disc
     disc_mask = cv2.inRange(canvas, np.array([1, 1, 1]), np.array([255, 255, 255]))
 
-    
     logging.info("Applying perlin noise to the disc background")
-    # Apply noise to make the disc look more natural 
+    # Apply noise to make the disc look more natural
     canvas = _apply_noise(canvas, size)
 
-    printing_color = (40,40,40)
+    printing_color = (40, 40, 40)
 
     logging.info("Drawing decorations on disc")
     # Draw full decorative lines
 
-    lines_to_draw = list([
-        (0.96641, 0.00528),
-        (0.95584, 0.00226),
-        (0.38415, 0.00603),
-        (0.37471, 0.00679)
-    ])
+    lines_to_draw = list(
+        [(0.96641, 0.00528), (0.95584, 0.00226), (0.38415, 0.00603), (0.37471, 0.00679)]
+    )
 
     for relative_center_radius, relative_width in lines_to_draw:
-        canvas = cv2.circle(canvas, (center_x, center_y), round(relative_center_radius * radius), printing_color, math.ceil(relative_width * radius), cv2.LINE_4)
+        canvas = cv2.circle(
+            canvas,
+            (center_x, center_y),
+            round(relative_center_radius * radius),
+            printing_color,
+            math.ceil(relative_width * radius),
+            cv2.LINE_4,
+        )
 
     # Draw repreating partial lines
 
-    partial_lines_to_draw = list([
-        (0.36905, 0.00452, 4.5, 2.13),
-        (0.36288, 0.00981, 4.5, 3.39)
-    ])
+    partial_lines_to_draw = list(
+        [(0.36905, 0.00452, 4.5, 2.13), (0.36288, 0.00981, 4.5, 3.39)]
+    )
 
-    for relative_center_radius, relative_width, repeat_every, draw_angle in partial_lines_to_draw:
+    for (
+        relative_center_radius,
+        relative_width,
+        repeat_every,
+        draw_angle,
+    ) in partial_lines_to_draw:
         radius_min = round((relative_center_radius - (relative_width / 2)) * radius)
         radius_max = round((relative_center_radius + (relative_width / 2)) * radius)
         for start_angle in np.arange(0, 360, repeat_every):
-            rr, cc = _get_partial_circle_coords(radius_min, radius_max, (center_x, center_y), start_angle, draw_angle, canvas.shape[0:2])
+            rr, cc = _get_partial_circle_coords(
+                radius_min,
+                radius_max,
+                (center_x, center_y),
+                start_angle,
+                draw_angle,
+                canvas.shape[0:2],
+            )
             canvas[rr, cc] = printing_color
 
     # Add beginning line
@@ -127,16 +154,28 @@ def _generate_ariston_24_base_disc(size: int, title: Optional[str], logo_file: O
     text = "_The beginning. Le commencement. Der Anfang._"
     font_scale = _fit_text_in_width(text, beginning_max_radius - beginning_min_radius)
 
-    canvas = cv2.putText(canvas, text, (round(radius - beginning_max_radius + 50), (radius + 50)), cv2.FONT_HERSHEY_TRIPLEX, font_scale, printing_color, 1)
+    canvas = cv2.putText(
+        canvas,
+        text,
+        (round(radius - beginning_max_radius + 50), (radius + 50)),
+        cv2.FONT_HERSHEY_TRIPLEX,
+        font_scale,
+        printing_color,
+        1,
+    )
 
     if not title is None:
         logging.info("Drawing disc title")
         title_radius = round(0.311 * radius)
-        canvas = _put_title(canvas, title, printing_color, title_radius, (center_x, center_y))
+        canvas = _put_title(
+            canvas, title, printing_color, title_radius, (center_x, center_y)
+        )
 
     if not logo_file is None:
         logging.info("Drawing logo file (sorry no alpha blending currently)")
-        canvas = _put_logos(canvas, logo_file, title_radius, (center_x, center_y), printing_color)
+        canvas = _put_logos(
+            canvas, logo_file, title_radius, (center_x, center_y), printing_color
+        )
 
     logging.info("Adding alpha channel to the image")
 
@@ -146,13 +185,19 @@ def _generate_ariston_24_base_disc(size: int, title: Optional[str], logo_file: O
 
     # Make hole in the middle
 
-    canvas = cv2.circle(canvas, (center_y, center_x), 0, (0,0,0,0), 20)
+    canvas = cv2.circle(canvas, (center_y, center_x), 0, (0, 0, 0, 0), 20)
     canvas[disc_mask == 0] = (0, 0, 0, 0)
 
     return (canvas, (center_x, center_y))
 
 
-def _draw_notes(canvas: np.ndarray, note_data: np.ndarray, config: dict, radius: int, center: Tuple[int, int]) -> np.ndarray:
+def _draw_notes(
+    canvas: np.ndarray,
+    note_data: np.ndarray,
+    config: dict,
+    radius: int,
+    center: Tuple[int, int],
+) -> np.ndarray:
     """Draw holes for the given notes on the given disc image
 
     Args:
@@ -181,23 +226,33 @@ def _draw_notes(canvas: np.ndarray, note_data: np.ndarray, config: dict, radius:
 
     # Shift the start of the disc to 180 degrees
 
-    note_data[:,1:3] = note_data[:,1:3] + 180
-    note_data[:,1:3][note_data[:,1:3] > 360] = note_data[:,1:3][note_data[:,1:3] > 360] - 360
+    note_data[:, 1:3] = note_data[:, 1:3] + 180
+    note_data[:, 1:3][note_data[:, 1:3] > 360] = (
+        note_data[:, 1:3][note_data[:, 1:3] > 360] - 360
+    )
 
     # Convert start_angle to width
-    note_data[:,1] = note_data[:,2] - note_data[:,1]
+    note_data[:, 1] = note_data[:, 2] - note_data[:, 1]
 
     # Get the start angle which is the inverse of the end angle as the discs are played counter clockwise
-    note_data[:,2] = 360 - note_data[:,2]
+    note_data[:, 2] = 360 - note_data[:, 2]
 
     # Change midi tones to track index
-    note_data[:,0] = np.array([config["track_mapping"][val] for val in note_data[:,0]])
+    note_data[:, 0] = np.array(
+        [config["track_mapping"][val] for val in note_data[:, 0]]
+    )
 
     # Draw these annoying things
     for note in note_data:
-        min_radius = round((config["note_start"] * radius) + ((note[0] - 1) * note_width) + ((note[0] - 1) * padding_width))
+        min_radius = round(
+            (config["note_start"] * radius)
+            + ((note[0] - 1) * note_width)
+            + ((note[0] - 1) * padding_width)
+        )
         max_radius = round(min_radius + note_width)
-        rr, cc = _get_partial_circle_coords(min_radius, max_radius, center, note[2], note[1], canvas.shape[:2])
+        rr, cc = _get_partial_circle_coords(
+            min_radius, max_radius, center, note[2], note[1], canvas.shape[:2]
+        )
         canvas[rr, cc] = (0, 0, 0, 0)
 
     return canvas
@@ -220,7 +275,6 @@ def _midi_to_absolute_timings(midi_file: str) -> np.ndarray:
     if not os.path.isfile(midi_file):
         raise ValueError("Midi file does not exist")
 
-
     midi_file = mido.MidiFile(midi_file)
 
     message_types = list()
@@ -241,18 +295,23 @@ def _midi_to_absolute_timings(midi_file: str) -> np.ndarray:
     # Convert to absolute times
     message_times = np.cumsum(message_times).astype(np.float64)
     # Rescale message times to degrees with 2.5 degrees buffer on each side
-    message_times = 355. * (message_times - message_times.min()) / np.ptp(message_times) + 2.5
+    message_times = (
+        355.0 * (message_times - message_times.min()) / np.ptp(message_times) + 2.5
+    )
 
     hole_data = list()
 
     for note in np.unique(message_notes):
         start_times = message_times[message_notes == note][0::2]
         end_times = message_times[message_notes == note][1::2]
-        hole_data.append(np.column_stack((np.full(start_times.shape, note), start_times, end_times)))
+        hole_data.append(
+            np.column_stack((np.full(start_times.shape, note), start_times, end_times))
+        )
 
     hole_data = np.vstack(hole_data)
 
     return hole_data
+
 
 def _get_config(type: str) -> dict:
     """Get configuration data required to draw holes
@@ -264,42 +323,49 @@ def _get_config(type: str) -> dict:
         dict: Configuration data for the given disc type
     """
     if type == "ariston_24":
-        return dict({
-            "track_mapping": {
-                45: 1,
-                47: 2,
-                50: 3,
-                52: 4,
-                57: 5,
-                59: 6,
-                61: 7,
-                62: 8,
-                64: 9,
-                66: 10,
-                68: 11,
-                69: 12,
-                71: 13,
-                73: 14,
-                74: 15,
-                75: 16,
-                76: 17,
-                78: 18,
-                79: 19,
-                80: 20,
-                81: 21,
-                83: 22,
-                85: 23,
-                86: 24
-            },
-            "note_start": 0.40,
-            "note_end": 0.96377,
-            "padding_to_note_ratio": 0.14285
-        })
+        return dict(
+            {
+                "track_mapping": {
+                    45: 1,
+                    47: 2,
+                    50: 3,
+                    52: 4,
+                    57: 5,
+                    59: 6,
+                    61: 7,
+                    62: 8,
+                    64: 9,
+                    66: 10,
+                    68: 11,
+                    69: 12,
+                    71: 13,
+                    73: 14,
+                    74: 15,
+                    75: 16,
+                    76: 17,
+                    78: 18,
+                    79: 19,
+                    80: 20,
+                    81: 21,
+                    83: 22,
+                    85: 23,
+                    86: 24,
+                },
+                "note_start": 0.40,
+                "note_end": 0.96377,
+                "padding_to_note_ratio": 0.14285,
+            }
+        )
 
 
-
-
-def _put_logos(canvas: np.ndarray, logos_file: str, radius: int, center: Tuple[int, int], color: Tuple[int,int,int], offset: Optional[int] = 100) -> np.ndarray:
+def _put_logos(
+    canvas: np.ndarray,
+    logos_file: str,
+    radius: int,
+    center: Tuple[int, int],
+    color: Tuple[int, int, int],
+    offset: Optional[int] = 100,
+) -> np.ndarray:
     """Draw logo file
 
     Args:
@@ -319,7 +385,7 @@ def _put_logos(canvas: np.ndarray, logos_file: str, radius: int, center: Tuple[i
     """
     if not _has_cairo:
         raise ImportError("Placing logos required the 'cairosvg' package")
-    
+
     if not os.path.isfile(logos_file):
         raise ValueError("Logo file does not exist")
 
@@ -329,31 +395,41 @@ def _put_logos(canvas: np.ndarray, logos_file: str, radius: int, center: Tuple[i
     top_left_x = center[0] + offset
     top_left_y = round(center[1] + (radius * math.cos(math.radians(135))))
 
-
     width = bottom_right_y - top_left_y
     height = bottom_right_x - top_left_x
 
-    png_buffer = cairosvg.svg2png(url = logos_file, output_width = width, output_height = height)
+    png_buffer = cairosvg.svg2png(
+        url=logos_file, output_width=width, output_height=height
+    )
     byte_array = np.frombuffer(png_buffer, np.uint8)
     logo_mat = cv2.imdecode(byte_array, cv2.IMREAD_UNCHANGED)
-    r_channel = logo_mat[:,:,2].copy()
-    logo_mat[:,:,2] = logo_mat[:,:,0]
-    logo_mat[:,:,0] = r_channel
+    r_channel = logo_mat[:, :, 2].copy()
+    logo_mat[:, :, 2] = logo_mat[:, :, 0]
+    logo_mat[:, :, 0] = r_channel
 
-    canvas = cv2.rectangle(canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2)
+    canvas = cv2.rectangle(
+        canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2
+    )
 
     # TODO: Use proper alpha blending
 
-    logo_chunk = canvas[top_left_x:bottom_right_x,top_left_y:bottom_right_y,:]
+    logo_chunk = canvas[top_left_x:bottom_right_x, top_left_y:bottom_right_y, :]
 
-    logo_chunk[logo_mat[:,:,3] > 0] = logo_mat[logo_mat[:,:,3] > 0][:,0:3]
+    logo_chunk[logo_mat[:, :, 3] > 0] = logo_mat[logo_mat[:, :, 3] > 0][:, 0:3]
 
-    canvas[top_left_x:bottom_right_x,top_left_y:bottom_right_y,:] = logo_chunk
+    canvas[top_left_x:bottom_right_x, top_left_y:bottom_right_y, :] = logo_chunk
 
     return canvas
 
 
-def _put_title(canvas: np.ndarray, title: str, color: Tuple[int, int, int], radius: int, center: Tuple[int, int], offset: Optional[int] = 100) -> np.ndarray:
+def _put_title(
+    canvas: np.ndarray,
+    title: str,
+    color: Tuple[int, int, int],
+    radius: int,
+    center: Tuple[int, int],
+    offset: Optional[int] = 100,
+) -> np.ndarray:
     """Draw title on disc
 
     Args:
@@ -369,7 +445,7 @@ def _put_title(canvas: np.ndarray, title: str, color: Tuple[int, int, int], radi
     """
     top_left_x = round(radius * math.sin(math.radians(225)) + center[0])
     top_left_y = round(radius * math.cos(math.radians(225)) + center[1])
-    
+
     bottom_right_x = center[0] - offset
     bottom_right_y = round(radius * math.cos(math.radians(315)) + center[1])
 
@@ -380,18 +456,32 @@ def _put_title(canvas: np.ndarray, title: str, color: Tuple[int, int, int], radi
 
     # Get text dimensions to center
 
-    text_width, text_height = cv2.getTextSize(title, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+    text_width, text_height = cv2.getTextSize(
+        title, cv2.FONT_HERSHEY_DUPLEX, fontScale=font_scale, thickness=1
+    )[0]
 
     title_x = round(bottom_right_x - ((height - text_height) / 2))
     title_y = round(((width - text_width) / 2) + top_left_y)
 
-    canvas = cv2.rectangle(canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2)
+    canvas = cv2.rectangle(
+        canvas, (top_left_y, top_left_x), (bottom_right_y, bottom_right_x), color, 2
+    )
 
-    canvas = cv2.putText(canvas, title, (title_y, title_x), cv2.FONT_HERSHEY_DUPLEX, font_scale, color, 3)
+    canvas = cv2.putText(
+        canvas, title, (title_y, title_x), cv2.FONT_HERSHEY_DUPLEX, font_scale, color, 3
+    )
 
     return canvas
 
-def _get_partial_circle_coords(min_radius: int, max_radius: int, center: Tuple[int, int], start_angle: float, width: float, canvas_shape: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray]:
+
+def _get_partial_circle_coords(
+    min_radius: int,
+    max_radius: int,
+    center: Tuple[int, int],
+    start_angle: float,
+    width: float,
+    canvas_shape: Tuple[int, int],
+) -> Tuple[np.ndarray, np.ndarray]:
     """Get coordinates of a partial circle within the specified radii
 
     Args:
@@ -407,14 +497,24 @@ def _get_partial_circle_coords(min_radius: int, max_radius: int, center: Tuple[i
     """
     # This is definitly a stupid and bad approach that is also quite expensive but at this point i spent a good 2 hours on this so i don't really care anymore
 
-    background = np.zeros(canvas_shape, dtype = np.uint8)
+    background = np.zeros(canvas_shape, dtype=np.uint8)
 
     for radius in np.arange(min_radius, max_radius):
-        background = cv2.ellipse(background, center, (radius, radius), 0, start_angle, start_angle + width, 1, 2)
-    
+        background = cv2.ellipse(
+            background,
+            center,
+            (radius, radius),
+            0,
+            start_angle,
+            start_angle + width,
+            1,
+            2,
+        )
+
     # background = skimage.morphology.binary_closing(background)
 
     return np.nonzero(background)
+
 
 def _apply_noise(canvas: np.ndarray, disc_mask: np.ndarray) -> np.ndarray:
     """Apply perlin noise to input image
@@ -430,20 +530,38 @@ def _apply_noise(canvas: np.ndarray, disc_mask: np.ndarray) -> np.ndarray:
 
     canvas = cv2.cvtColor(canvas, cv2.COLOR_RGB2HSV)
 
-    noise_maps = list([
-        noise.noise2(np.linspace(0, 1, canvas.shape[0]), np.linspace(0, 1, canvas.shape[0]), grid_mode = True, octaves=10),
-        noise.noise2(np.linspace(1, 0, canvas.shape[0]), np.linspace(1, 0, canvas.shape[0]), grid_mode = True, octaves=10),
-        noise.noise2(np.linspace(0, 1, canvas.shape[0]), np.linspace(1, 0, canvas.shape[0]), grid_mode = True, octaves=10)
-    ])
+    noise_maps = list(
+        [
+            noise.noise2(
+                np.linspace(0, 1, canvas.shape[0]),
+                np.linspace(0, 1, canvas.shape[0]),
+                grid_mode=True,
+                octaves=10,
+            ),
+            noise.noise2(
+                np.linspace(1, 0, canvas.shape[0]),
+                np.linspace(1, 0, canvas.shape[0]),
+                grid_mode=True,
+                octaves=10,
+            ),
+            noise.noise2(
+                np.linspace(0, 1, canvas.shape[0]),
+                np.linspace(1, 0, canvas.shape[0]),
+                grid_mode=True,
+                octaves=10,
+            ),
+        ]
+    )
 
     # Right now we don't apply noise to the H channel, though we might change that later
     for channel, noise_map in enumerate(noise_maps[0:2], 1):
         noise_map[disc_mask == 0] = 0
-        canvas[:,:,channel] = canvas[:,:,channel] + (noise_map * 100)
+        canvas[:, :, channel] = canvas[:, :, channel] + (noise_map * 100)
 
     canvas = cv2.cvtColor(canvas, cv2.COLOR_HSV2RGB)
 
     return canvas
+
 
 def _fit_text_in_width(text: str, width: int) -> float:
     """Find the biggest font scale that fit the given text within the given width
@@ -456,11 +574,14 @@ def _fit_text_in_width(text: str, width: int) -> float:
         float: Biggest font_scale that will fit given text in the given width
     """
     for font_scale in np.flip(np.arange(0, (width / 250), 0.1)):
-        text_width = cv2.getTextSize(text, cv2.FONT_HERSHEY_TRIPLEX, fontScale = font_scale, thickness = 1)[0][0]
+        text_width = cv2.getTextSize(
+            text, cv2.FONT_HERSHEY_TRIPLEX, fontScale=font_scale, thickness=1
+        )[0][0]
         if text_width < width:
             return font_scale
-    
+
     return -1
+
 
 def _fit_text_in_rectangle(text: str, width: int, height: int) -> float:
     """Find the biggest font scale that fits the given text within the given rectangle
@@ -474,8 +595,10 @@ def _fit_text_in_rectangle(text: str, width: int, height: int) -> float:
         float: Biggest font_scale that will fit given text in the given rectangle
     """
     for font_scale in np.flip(np.arange(0.1, (width / 100), 0.1)):
-        text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_DUPLEX, fontScale = font_scale, thickness = 1)[0]
+        text_size = cv2.getTextSize(
+            text, cv2.FONT_HERSHEY_DUPLEX, fontScale=font_scale, thickness=1
+        )[0]
         if text_size[0] < width and text_size[1] < height:
             return font_scale
-    
+
     return -1

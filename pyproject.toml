@@ -34,7 +34,8 @@ dependencies = [
     "matplotlib",
     "scikit-learn",
     "mido",
-    "scipy"
+    "scipy",
+    "vnoise"
 ]
 
 [project.optional-dependencies]
