@@ -29,7 +29,7 @@ def get_config(config: str, method: str) -> dict:
         dict: Read and validated configuration data
     """
 
-    if re.match("\.json$", config):
+    if re.search("\.json$", config):
         logging.info(
             "Provided config looks like a filename, trying to read configuration from that file"
         )
@@ -40,7 +40,7 @@ def get_config(config: str, method: str) -> dict:
             logging.error(f"Failed to open file '{config}'")
             raise
         logging.info(f"Read configuration from file {config}")
-    elif re.match("^\{.*\}$", config.strip()):
+    elif re.search("^\{.*\}$", config.strip()):
         logging.info(
             "Provided config looks like a json string, trying to read configuration from the string"
         )

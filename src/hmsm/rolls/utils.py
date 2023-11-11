@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 import scipy.spatial.distance
 import skimage
+import skimage.color
 import skimage.filters
 import skimage.io
 import skimage.measure
@@ -200,3 +201,35 @@ def get_initial_alignment_grid(
     alignment_grid = np.array([list(v.values()) for v in track_measurements])
     alignment_grid[:, 0:2] = alignment_grid[:, 0:2] / roll_width_mm
     return alignment_grid
+
+
+def guess_background_color(image: np.ndarray, n_points: Optional[int] = 1000) -> str:
+    sample_points_y = np.random.choice(
+        image.shape[0] - 1,
+        n_points,
+        replace=False if n_points >= image.shape[0] else True,
+    )
+
+    sample_points_x = np.concatenate(
+        [
+            np.random.choice(10, int(n_points / 2), replace=True),
+            np.random.choice(
+                np.arange(image.shape[1] - 11, image.shape[1] - 1),
+                int(n_points / 2),
+                replace=True,
+            ),
+        ]
+    )
+
+    sample_points = image[sample_points_y, sample_points_x]
+
+    sample_points = skimage.color.rgb2hsv(sample_points)
+
+    mean_value = np.mean(sample_points, axis=0)[2]
+
+    if 0.2 <= mean_value <= 0.8:
+        logging.warning(
+            f"Found inconclusive blackness value of {mean_value} when trying to determine the background color. This might result in problems during further processing."
+        )
+
+    return "black" if mean_value < 0.5 else "white"
