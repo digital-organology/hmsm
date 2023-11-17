@@ -1,6 +1,7 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
 import argparse
+import datetime
 import logging
 import pathlib
 import sys
@@ -14,6 +15,7 @@ import hmsm.discs
 # import hmsm.rolls.utils
 import hmsm.discs.generator
 import hmsm.discs.utils
+import hmsm.rolls.analysis
 import hmsm.rolls.utils
 
 
@@ -285,22 +287,32 @@ def roll2midi(argv=sys.argv):
         help="Size of the image chunks to use for processing",
     )
     parser.add_argument(
-        "-n",
-        "--n_clusters",
-        dest="n_clusters",
-        default=2,
-        const=2,
-        nargs="?",
-        type=int,
-        help="Number of clusters to consider when creating masks. Note that there will always be n+1 clusters as one cluster is implicitly created during binarization.",
-    )
-    parser.add_argument(
         "-d",
         "--debug",
         action="store_true",
-        help="Enable debug output. Note that this will also output various messages from other used python packages and add siginificant calculation overhead for creating debug information.",
+        help="Enable debug output. Note that this will also output various messages from other utilized third party python packages that use PEP 282 logging (notably scikit image) and add siginificant calculation overhead for creating debug information.",
     )
-    parser.set_defaults(debug=False, n_clusters=2, chunk_size=4000)
+    parser.add_argument(
+        "-l",
+        "--skip-lines",
+        dest="skip_lines",
+        default=0,
+        const=0,
+        nargs="?",
+        type=int,
+        help="Optional number of lines to skip before starting to process the file.",
+    )
+    parser.add_argument(
+        "-b",
+        "--background",
+        dest="bg_color",
+        default="guess",
+        const="guess",
+        nargs="?",
+        type=str,
+        help="Color of the background in the provided roll scan. Currently only black or white backgrounds are supported. If ommited this will be estimated from a sample of pixels.",
+    )
+    parser.set_defaults(debug=False, bg_color="guess")
     args = parser.parse_args(argv[1:])
 
     logging.basicConfig(
@@ -308,9 +320,14 @@ def roll2midi(argv=sys.argv):
         format="%(asctime)s [%(levelname)s]: %(message)s",
     )
 
+    print(
+        "This program is licensed to you under the terms of the GNU General Public License v3.0 or later and comes with ABSOLUTELY NO WARRANTY.\n\n"
+    )
+
     if args.debug:
-        pathlib.Path("debug_data").mkdir(exist_ok=True)
-        pathlib.Path("masks").mkdir(exist_ok=True)
+        debug_path = f"debug_data_{input}"
+        pathlib.Path(debug_path).mkdir(exist_ok=True)
+        pathlib.Path(f"{debug_path}/masks").mkdir(exist_ok=True)
     try:
         config = hmsm.config.get_config(args.config, "roll")
     except Exception:
@@ -319,5 +336,99 @@ def roll2midi(argv=sys.argv):
         sys.exit(1)
 
     hmsm.rolls.process_roll(
-        args.input, args.output, "roll", config, args.n_clusters, args.chunk_size
+        args.input,
+        args.output,
+        config,
+        args.bg_color,
+        args.chunk_size,
+        args.skip_lines,
+    )
+
+
+def roll2config(argv=sys.argv):
+    """CLI entrypoint for initial analysis and estimation of configuration parameters
+
+    Args:
+        argv (list, optional): Command line arguments. Defaults to sys.argv.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", help="Input image file")
+    parser.add_argument("output", help="Output json file")
+    required_named = parser.add_argument_group("required named arguments")
+    required_named.add_argument(
+        "-w",
+        "--width",
+        dest="width",
+        default=-1,
+        const=-1,
+        nargs="?",
+        type=float,
+        help="Width of the physical roll in mm",
+    )
+    parser.add_argument(
+        "-l",
+        "--skip_lines",
+        dest="line_skip",
+        default=0,
+        const=0,
+        nargs="?",
+        type=float,
+        help="Number of lines to skip from the beginning of the roll",
+    )
+    parser.add_argument(
+        "-s",
+        "--hole_size",
+        dest="hole_width",
+        default=1.5,
+        const=1.5,
+        nargs="?",
+        type=float,
+        help="Width of the holes on the roll. Currently only roles with uniform holes are supported.",
+    )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        dest="threshold",
+        default=0.15,
+        const=0.15,
+        nargs="?",
+        type=float,
+        help="Threshold to use when binarizing, must be between 0 and 1",
+    )
+    parser.add_argument(
+        "-b",
+        "--bandwidth",
+        dest="bandwidth",
+        default=2,
+        const=2,
+        nargs="?",
+        type=float,
+        help="Bandwith to use for the underlying alogrithm when finding tracks. Higher values will result in more tracks beeing grouped together while lower values will separate more tracks. You will likely not have to touch this.",
+    )
+    parser.add_argument(
+        "-c",
+        "--chunk_size",
+        dest="chunk_size",
+        default=4000,
+        const=4000,
+        nargs="?",
+        type=float,
+        help="(Vertical) size of chunks to use for processing the piano roll.",
+    )
+    args = parser.parse_args(argv[1:])
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s]: %(message)s",
+    )
+
+    hmsm.rolls.analysis.analyze_roll(
+        args.input,
+        args.output,
+        args.width,
+        args.line_skip,
+        args.hole_width,
+        args.threshold,
+        args.bandwidth,
+        args.chunk_size,
     )

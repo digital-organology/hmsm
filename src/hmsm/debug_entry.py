@@ -20,6 +20,8 @@ def main(argv=sys.argv):
         hmsm.cli.roll2midi(argv)
     elif method == "midi2disc":
         hmsm.cli.midi2disc(argv)
+    elif method == "roll2config":
+        hmsm.cli.roll2config(argv)
 
 
 if __name__ == "__main__":

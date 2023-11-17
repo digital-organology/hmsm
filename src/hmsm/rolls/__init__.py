@@ -4,6 +4,7 @@ import datetime
 import functools
 import logging
 import os
+import traceback
 from typing import List, Optional, Tuple
 
 import cv2
@@ -14,6 +15,13 @@ import scipy.spatial.distance
 import skimage.io
 import skimage.morphology
 
+try:
+    import enlighten
+except ImportError:
+    _has_enlighten = False
+else:
+    _has_enlighten = True
+
 import hmsm.midi
 import hmsm.rolls.masking
 import hmsm.rolls.utils
@@ -23,7 +31,6 @@ import hmsm.utils
 def process_roll(
     input_path: str,
     output_path: str,
-    method: str,
     config: dict,
     bg_color: Optional[str] = "guess",
     chunk_size: Optional[int] = 4000,
@@ -37,10 +44,10 @@ def process_roll(
     Args:
         input_path (str): Path to the input image of a piano roll
         output_path (str): Path to which to write the created midi file
-        method (str): Method to use for digitization. This parameter is currently unused and can be set to any value.
         config (dict): Configuration data to use for midi creation. Needs to contain, amongst others, initial guesses on the position of the tracks.
         bg_color (Optional[str], optional): Color of the background in the supplied roll scan. Must currently be one of 'black' and 'white' or 'guess' in which case it will be attempted to infer the color from the supplied scan. Defaults to "guess".
         chunk_size (Optional[int], optional): Vertical size of chunks to segment the image to for processing. Defaults to 4000.
+        skip_lines (Optional[int], optional): Number of lines to skip from the beginning of the roll scan, useful for excluding the roll head from beeing processed. Defaults to 0.
         parameter_estimation_chunks (Optional[int], optional): Number of chunks to generate for estimating required digitization parameters. Higher numbers should improve accuracy but will have a negative performance impact. Defaults to 5.
     """
     logging.info(f"Reading input image from {input_path}...")
@@ -58,7 +65,11 @@ def process_roll(
         )
 
     if bg_color == "guess":
+        logging.info(
+            f"Background color of the input image was not specified, attempting automatic detection"
+        )
         bg_color = hmsm.rolls.utils.guess_background_color(image)
+        logging.info(f"Background color was detected to be {bg_color}")
 
     generator = hmsm.rolls.masking.MaskGenerator(
         image,
@@ -68,7 +79,9 @@ def process_roll(
         **config["binarization_options"],
     )
 
-    logging.info("Beginning processing of note data")
+    logging.info(
+        "Beginning processing of the roll scan and extraction of musical action signals"
+    )
 
     alignment_grid = hmsm.rolls.utils.get_initial_alignment_grid(
         config["roll_width_mm"], config["track_measurements"]
@@ -78,31 +91,49 @@ def process_roll(
 
     width_bounds = _calculate_hole_width_range(config["hole_width_mm"])
 
-    for bounds, masks in iter(generator):
-        logging.info(f"Processing chunk from {bounds[0]} to {bounds[1]}")
-
-        left_edge, right_edge = _get_roll_edges(np.invert(masks["holes"]))
-
-        notes, alignment_grid = extract_note_data(
-            masks["holes"], (left_edge, right_edge), alignment_grid, width_bounds
+    if _has_enlighten:
+        manager = enlighten.get_manager()
+        progress_bar = manager.counter(
+            total=generator.get_number_iterations(),
+            desc="Processing roll scan",
+            unit="chunks",
         )
+
+    for bounds, masks in iter(generator):
+        if not _has_enlighten:
+            logging.info(f"Processing chunk from {bounds[0]} to {bounds[1]}")
+
+        try:
+            left_edge, right_edge = _get_roll_edges(masks["holes"])
+            notes, alignment_grid = extract_note_data(
+                masks["holes"],
+                (left_edge, right_edge),
+                alignment_grid,
+                width_bounds,
+            )
+        except Exception as e:
+            logging.warning(
+                f"Encountere an exception when trying to process the chunk [{bounds[0]}, {bounds[1]}] will assume that this is because the roll is finished and stop processing. Exception encountered: {traceback.format_exc()}"
+            )
+            break
 
         if notes is not None:
             notes[:, 0:2] = notes[:, 0:2] + bounds[0]
             note_data.append(notes)
 
+        if _has_enlighten:
+            progress_bar.update()
+
+    if _has_enlighten:
+        manager.stop()
+
     note_data = np.vstack(note_data)
 
-    logger = logging.getLogger()
-    if logger.isEnabledFor(logging.DEBUG):
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
         filename = os.path.join("debug_data", "note_data_raw.csv")
         np.savetxt(filename, note_data, delimiter=",")
 
-    logging.info("Processing control information [NOT IMPLEMENTED YET]")
-
-    note_data = process_control_tracks(note_data)
-
-    logging.info("Merging notes")
+    logging.info("Post-processing extracted data...")
 
     note_data = merge_notes(note_data)
 
@@ -110,35 +141,23 @@ def process_roll(
     note_duration = (note_data[:, 1] - note_data[:, 0]).tolist()
     midi_tone = note_data[:, 2].tolist()
 
-    if logger.isEnabledFor(logging.DEBUG):
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
         filename = os.path.join("debug_data", "note_data_processed.csv")
         debug_array = np.hstack([note_start, note_duration, midi_tone])
         np.savetxt(filename, debug_array, delimiter=",")
 
-    logging.info("Creating midi data")
+    logging.info("Finished post processing, generating midi data...")
 
-    midi = hmsm.midi.create_midi(note_start, note_duration, midi_tone, scaling_factor=3)
+    midi_generator = hmsm.midi.MidiGenerator(3)
+    midi_generator.make_midi(
+        note_start, note_duration, midi_tone, config["hole_width_mm"]
+    )
 
     logging.info(f"Writing midi file to {output_path}")
 
-    midi.save(output_path)
+    midi_generator.write_midi(output_path)
 
     logging.info("Done, bye")
-
-
-def process_control_tracks(notes: np.ndarray) -> np.ndarray:
-    """Process detected control tracks on the roll
-
-    This part of the processing pipeline is yet to be implemented. The method will currently discard all control information.
-
-    Args:
-        notes (np.ndarray): Array containing detected notes
-
-    Returns:
-        np.ndarray: Currently: Input array except for notes on control tracks
-    """
-    # Does not currently do anything but filter out the control information
-    return notes[notes[:, 2] >= 0, :]
 
 
 def merge_notes(notes: np.ndarray) -> np.ndarray:
@@ -188,6 +207,16 @@ def _calculate_hole_width_range(
     tolerances: Optional[Tuple[float, float]] = (0.5, 1.25),
     resolution: Optional[int] = 300,
 ) -> Tuple[int, int]:
+    """Calculate the accapatable size of components to be used as hole
+
+    Args:
+        width_mm (float): Physical width of the holes on the roll in mm.
+        tolerances (Optional[Tuple[float, float]], optional): Tolerances to use when calculating the interval. Defaults to (0.5, 1.25).
+        resolution (Optional[int], optional): Resolution of the input scan in dpi. Defaults to 300.
+
+    Returns:
+        Tuple[int, int]: Lower and upper bounds for component filtering, in pixels
+    """
     # TODO: Make this work for rolls that have multiple types of holes
     bounds = (
         int(width_mm / 25.4 * resolution * tolerances[0]),
@@ -311,6 +340,9 @@ def _get_roll_edges(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     Returns:
         Tuple[np.ndarray, np.ndarray]: Two one dimensional arrays that contain the position of the roll edge along the given mask
     """
+    if mask[0, 0] == True:
+        mask = np.invert(mask)
+
     mask = skimage.morphology.binary_closing(mask, skimage.morphology.diamond(5))
 
     rows, cols = np.where(mask)
@@ -330,14 +362,17 @@ def _filter_component(
     component: np.ndarray,
     width_bounds: Optional[Tuple[float, float]] = None,
     density_bounds: Optional[Tuple[float, float]] = None,
+    height_bounds: Optional[Tuple[float, float]] = None,
     height_to_width_ratio: Optional[Tuple[float, float]] = None,
 ) -> bool:
-    """Checks if the given compoennt fits within the given bounds
+    """Checks if the given component fits within the given bounds
 
     Args:
         component (np.ndarray): Array of coordinates that belong to the component in question
-        width_bounds (Tuple[float, float]): Bounds within which the widht of the given component must be
-        density_bounds (Tuple[float, float]): Bounds within which the density of the given component must be
+        width_bounds (Optional[Tuple[float, float]], optional): Bounds within which the widht of the given component must be. Defaults to None.
+        density_bounds (Optional[Tuple[float, float]], optional): Bounds within which the density of the given component must be. Defaults to None.
+        height_bounds (Optional[Tuple[float, float]], optional): Bounds within which the height of the given component must be. Defaults to None.
+        height_to_width_ratio (Optional[Tuple[float, float]], optional): Bounds within which the height to width ratio of the given component must be. Defaults to None.
 
     Returns:
         bool: True if the component falls within the bounds provided, False otherwise
@@ -346,6 +381,11 @@ def _filter_component(
 
     if width_bounds is not None and (
         dims[1] < width_bounds[0] or dims[1] > width_bounds[1]
+    ):
+        return False
+
+    if height_bounds is not None and (
+        dims[0] < height_bounds[0] or dims[0] > height_bounds[1]
     ):
         return False
 
