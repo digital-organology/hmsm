@@ -34,7 +34,7 @@ This will:
 * `-l 5000` skip the first 5000 lines of the image provided, which can be useful in ignoring the head of the roll (if present) which may or may not introduce erroneously detected note information if not skipped
 * `-c clavitist` use the `clavitist` profile bundled with the application. You may also pass the path to a json file containing a custom configuration or even a raw json string here.
 * `hupfeld_clavitist_roll.tif` read the roll scan from this file
-' `out.mid` write the generated midi file here
+* `out.mid` write the generated midi file here
 
 For more inforamtion on the command line interface for roll digitization pass the `-h` or `--help` parameter:
 
