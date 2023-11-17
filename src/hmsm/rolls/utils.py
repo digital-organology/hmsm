@@ -1,47 +1,80 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
 import os
-os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2,40).__str__()
-import cv2
-import skimage.filters
-import random
+
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
+import itertools
 import logging
+import random
+from typing import List, Optional, Tuple
+
+import cv2
 import numpy as np
-import skimage.io
-import skimage
 import scipy.spatial.distance
-import hmsm.rolls.masking
-from typing import Optional, Tuple, List
+import skimage
+import skimage.color
+import skimage.filters
+import skimage.io
+import skimage.measure
 
-def create_chunk_masks(image_path: str, chunk_size: Optional[int] = 4000, n_clusters: Optional[int] = 2, n_chunks: Optional[int] = 5) -> None:
-    """Create masks for the input image
+import hmsm.rolls
+import hmsm.utils
+from hmsm.rolls.masking import MaskGenerator
 
-    This method will generate masks based on color space segmentation for the given input image.
-    To ease memory pressure this process is done chunkwise on the input image.
+
+def get_initial_alignment_grid(
+    roll_width_mm: int, track_measurements: List
+) -> np.ndarray:
+    """Gets the initial alignment grid from the provided track measurements and converts it into relative positions
 
     Args:
-        image_path (str): Path to the input image.
-        chunk_size (Optional[int], optional): Vertical size of the chunks in which the image will be processed. Defaults to 4000.
-        n_clusters (Optional[int], optional): Number of cluster for which to create masks. Defaults to 2.
-        n_chunks (Optional[int], optional): Number of chunks to use for parameter estimation. Defaults to 5.
-    """    
+        roll_width_mm (int): Widht of the roll in mm
+        track_measurements (List): List containing information about each track on the roll
 
-    logging.info(f"Reading input image from {image_path}...")
-    image = skimage.io.imread(image_path)
+    Returns:
+        np.ndarray: Initial alignment grid with relative positions
+    """
+    alignment_grid = np.array([list(v.values()) for v in track_measurements])
+    alignment_grid[:, 0:2] = alignment_grid[:, 0:2] / roll_width_mm
+    return alignment_grid
 
 
-    generator = hmsm.rolls.masking.MaskGenerator(image, chunk_size, n_clusters)
+def guess_background_color(image: np.ndarray, n_points: Optional[int] = 1000) -> str:
+    """Detect the background color of the provided image
 
-    logging.info(f"Estimating required parameters using {n_chunks} slices of {chunk_size} pixels height each")
+    Args:
+        image (np.ndarray): Input image to get the background color of
+        n_points (Optional[int], optional): Number of sample points to use for detection. Defaults to 1000.
 
-    generator.estimate_mask_parameters()
+    Returns:
+        str: Detected background color, will be either "black" or "white"
+    """
+    sample_points_y = np.random.choice(
+        image.shape[0] - 1,
+        n_points,
+        replace=False if n_points >= image.shape[0] else True,
+    )
 
-    logging.info(f"Parameters estimated, beginning mask creation")
+    sample_points_x = np.concatenate(
+        [
+            np.random.choice(10, int(n_points / 2), replace=True),
+            np.random.choice(
+                np.arange(image.shape[1] - 11, image.shape[1] - 1),
+                int(n_points / 2),
+                replace=True,
+            ),
+        ]
+    )
 
-    for bounds, masks in iter(generator):
-        (start_idx, end_idx) = bounds
-        logging.info(f"Writing images for chunk from {start_idx} to {end_idx}")
-        for mask_id in range(len(masks)):
-            mask_ubyte = skimage.img_as_ubyte(masks[mask_id])
-            filename = os.path.join("masks", f"mask_{start_idx}_{end_idx}_{mask_id}.tif")
-            skimage.io.imsave(filename, mask_ubyte)
+    sample_points = image[sample_points_y, sample_points_x]
+
+    sample_points = skimage.color.rgb2hsv(sample_points)
+
+    mean_value = np.mean(sample_points, axis=0)[2]
+
+    if 0.2 <= mean_value <= 0.8:
+        logging.warning(
+            f"Found inconclusive blackness value of {mean_value} when trying to determine the background color. This might result in problems during further processing."
+        )
+
+    return "black" if mean_value < 0.5 else "white"

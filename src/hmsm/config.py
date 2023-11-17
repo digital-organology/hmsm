@@ -1,9 +1,11 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
 import json
-import pkg_resources
 import logging
 import re
+
+import pkg_resources
+
 
 def get_config(config: str, method: str) -> dict:
     """Find and load configuration data
@@ -27,17 +29,21 @@ def get_config(config: str, method: str) -> dict:
         dict: Read and validated configuration data
     """
 
-    if re.match("\.json$", config):
-        logging.info("Provided config looks like a filename, trying to read configuration from that file")
+    if re.search("\.json$", config):
+        logging.info(
+            "Provided config looks like a filename, trying to read configuration from that file"
+        )
         try:
-            with open(config, "r", encoding = "UTF-8") as f:
+            with open(config, "r", encoding="UTF-8") as f:
                 config_data = json.load(f)
         except FileNotFoundError:
             logging.error(f"Failed to open file '{config}'")
             raise
         logging.info(f"Read configuration from file {config}")
-    elif re.match("^\{.*\}$", config.strip()):
-        logging.info("Provided config looks like a json string, trying to read configuration from the string")
+    elif re.search("^\{.*\}$", config.strip()):
+        logging.info(
+            "Provided config looks like a json string, trying to read configuration from the string"
+        )
         try:
             config_data = json.loads(config)
         except ValueError:
@@ -56,28 +62,32 @@ def get_config(config: str, method: str) -> dict:
             if config_data["method"] == method:
                 logging.info("Configuration read from internal config file")
             else:
-                raise ValueError("Matching configuration profile found but unsuitable for processing method to be executed")
+                raise ValueError(
+                    "Matching configuration profile found but unsuitable for processing method to be executed"
+                )
         except KeyError:
-            logging.error("No matching configuration data found in internal config file")
+            logging.error(
+                "No matching configuration data found in internal config file"
+            )
             raise
         except FileNotFoundError:
             logging.error("Failed to open internal config file, something is broken")
             raise
         except ValueError:
             raise
-    
-    if validate_config(config_data, type, method):
+
+    if validate_config(config_data, method):
         logging.info("Configuration loaded and verified")
         return config_data
-    
+
     raise ValueError("Failed to validate the given configuration")
 
-def validate_config(config: dict, type: str, method: str) -> bool:
+
+def validate_config(config: dict, method: str) -> bool:
     """Checks if the given configuration data is sufficient to execute the requested operation
 
     Args:
         config (dict): Configuration data
-        type (str): Type of the medium to process
         method (str): Digitization method to apply
 
     Raises:
@@ -88,7 +98,9 @@ def validate_config(config: dict, type: str, method: str) -> bool:
     """
     if method == "cluster":
         return _validate_cluster_config(config)
-    
+    elif method == "roll":
+        return _validate_roll_config(config)
+
     raise ValueError(f"method '{method}' currently not implemented")
 
 
@@ -103,8 +115,29 @@ def _validate_cluster_config(config: dict) -> bool:
     """
     required_keys = {"radius_inner", "first_track", "track_mapping"}
     if not required_keys <= config.keys():
-        logging.error(f"Configuration misses the following required values: {required_keys - config.keys()}")
+        logging.error(
+            f"Configuration misses the following required values: {required_keys - config.keys()}"
+        )
         return False
-    
+
     # TODO: Implement type/range checking
+    return True
+
+
+def _validate_roll_config(config: dict) -> bool:
+    """Checks if all required parameters for piano roll digitization are set
+
+    Args:
+        config (dict): Configuration parameters
+
+    Returns:
+        bool: True if the configuration is valid, False otherwise
+    """
+    required_keys = {"track_measurements", "roll_width_mm"}
+    if not required_keys <= config.keys():
+        logging.error(
+            f"Configuration misses the following required values: {required_keys - config.keys()}"
+        )
+        return False
+
     return True

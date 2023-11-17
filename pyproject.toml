@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hmsm"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
     {name = "David Fuhry", email = "david.fuhry@uni-leipzig.de"}
 ]
@@ -39,6 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 midi2disc = ["cairosvg"]
+progressbar = ["enlighten"]
 
 [project.urls]
 homepage = "https://organology.uni-leipzig.de/"
@@ -48,6 +49,7 @@ repository = "https://github.com/digital-organology/hmsm"
 disc2roll = "hmsm.cli:disc2roll"
 disc2midi = "hmsm.cli:disc2midi"
 roll2masks = "hmsm.cli:roll2masks"
+roll2midi = "hmsm.cli:roll2midi"
 midi2disc = "hmsm.cli:midi2disc"
 
 [tools.setuptools.packages.find]

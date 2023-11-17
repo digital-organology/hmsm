@@ -1,19 +1,24 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
 import os
-os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2,40).__str__()
+
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
 import logging
-import numpy as np
-import pkg_resources
-import cv2
-import skimage.filters
-import skimage.color
-import skimage.io
-import skimage
-import scipy
 from typing import Optional, Tuple
 
-def read_image(path: str, binarize: bool = False, threshold: Optional[int] = None) -> np.ndarray:
+import cv2
+import numpy as np
+import pkg_resources
+import scipy
+import skimage
+import skimage.color
+import skimage.filters
+import skimage.io
+
+
+def read_image(
+    path: str, binarize: bool = False, threshold: Optional[int] = None
+) -> np.ndarray:
     """Read an image from disk
 
     Wrapper around skimage.io.imread that will also perform binarization if desired
@@ -29,12 +34,15 @@ def read_image(path: str, binarize: bool = False, threshold: Optional[int] = Non
     try:
         img = skimage.io.imread(path)
     except FileNotFoundError:
-        logging.error(f"The system could not find the specified file at path '{path}', could not read image file")
+        logging.error(
+            f"The system could not find the specified file at path '{path}', could not read image file"
+        )
         raise
 
     logging.info(f"Image read from '{path}'")
 
     return binarize_image(img, threshold) if binarize else img
+
 
 def binarize_image(image: np.ndarray, threshold: Optional[int] = None) -> np.ndarray:
     """Binarize image
@@ -50,15 +58,16 @@ def binarize_image(image: np.ndarray, threshold: Optional[int] = None) -> np.nda
     """
     if image.ndim == 3 and image.shape[2] == 3:
         image = skimage.color.rgb2gray(image)
-    
+
     if threshold is None:
         threshold = skimage.filters.threshold_otsu(image)
     else:
-        threshold = (threshold / 255)
+        threshold = threshold / 255
 
     img_bin = image > threshold
 
     return skimage.img_as_ubyte(img_bin)
+
 
 def crop_image_to_contents(image: np.ndarray) -> np.ndarray:
     """Crop image to contents
@@ -83,7 +92,12 @@ def crop_image_to_contents(image: np.ndarray) -> np.ndarray:
 
     max_value = image.max()
 
-    if image[0,0] == max_value and image[0,-1] == max_value and image[-1, 0] == max_value and image[-1,-1] == max_value:
+    if (
+        image[0, 0] == max_value
+        and image[0, -1] == max_value
+        and image[-1, 0] == max_value
+        and image[-1, -1] == max_value
+    ):
         img = np.invert(image.copy())
     else:
         img = image
@@ -91,15 +105,26 @@ def crop_image_to_contents(image: np.ndarray) -> np.ndarray:
     y_values, x_values = np.nonzero(img)
 
     y_min = y_values.min() - 20 if y_values.min() - 20 >= 0 else 0
-    y_max = y_values.max() + 20 if y_values.max() + 20 <= img.shape[0] - 1 else img.shape[0] - 1
+    y_max = (
+        y_values.max() + 20
+        if y_values.max() + 20 <= img.shape[0] - 1
+        else img.shape[0] - 1
+    )
 
     x_min = x_values.min() - 20 if x_values.min() - 20 >= 0 else 0
-    x_max = x_values.max() + 20 if x_values.max() + 20 <= img.shape[1] - 1 else img.shape[1] - 1
+    x_max = (
+        x_values.max() + 20
+        if x_values.max() + 20 <= img.shape[1] - 1
+        else img.shape[1] - 1
+    )
 
     output_image = output_image[y_min:y_max, x_min:x_max]
     return output_image
 
-def morphological_edge_detection(image: np.ndarray, n_erosions: Optional[int] = 2) -> np.ndarray:
+
+def morphological_edge_detection(
+    image: np.ndarray, n_erosions: Optional[int] = 2
+) -> np.ndarray:
     """Detect edges on the input image
 
     This will perform morphological edge detection on the input image.
@@ -112,7 +137,7 @@ def morphological_edge_detection(image: np.ndarray, n_erosions: Optional[int] = 
     Returns:
         np.ndarray: Image of the same shape as the input image with edges
     """
-    kernel = np.ones((3,3), np.uint8)
+    kernel = np.ones((3, 3), np.uint8)
 
     for n in range(n_erosions):
         image = cv2.erode(image, kernel)
@@ -122,6 +147,7 @@ def morphological_edge_detection(image: np.ndarray, n_erosions: Optional[int] = 
     edges = image - image_eroded
 
     return edges
+
 
 def interpolate_missing_pixels(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Interpolate missing pixels in an image
@@ -136,13 +162,17 @@ def interpolate_missing_pixels(image: np.ndarray, mask: np.ndarray) -> np.ndarra
     unknown_coords = np.argwhere(mask == True)
 
     interpolated_values = scipy.interpolate.griddata(
-        np.argwhere(mask == False), image[mask == False], unknown_coords,
-        method="nearest", fill_value= [0,0,0]
+        np.argwhere(mask == False),
+        image[mask == False],
+        unknown_coords,
+        method="nearest",
+        fill_value=[0, 0, 0],
     )
 
     interpolated_image = image.copy()
-    interpolated_image[unknown_coords[:,0], unknown_coords[:,1]] = interpolated_values
+    interpolated_image[unknown_coords[:, 0], unknown_coords[:, 1]] = interpolated_values
     return interpolated_image
+
 
 def get_lut() -> np.ndarray:
     """Load a lut included in the package
@@ -157,7 +187,12 @@ def get_lut() -> np.ndarray:
 
     return lut
 
-def image_from_coords(coords: dict|list, shape: Optional[Tuple[int, int]] = None, labels: Optional[bool|list] = None) -> np.ndarray:
+
+def image_from_coords(
+    coords: dict | list,
+    shape: Optional[Tuple[int, int]] = None,
+    labels: Optional[bool | list] = None,
+) -> np.ndarray:
     """Make an image from coordinate lists
 
     Args:
@@ -175,15 +210,14 @@ def image_from_coords(coords: dict|list, shape: Optional[Tuple[int, int]] = None
     if isinstance(coords, list):
         coords = dict(zip(range(1, len(coords) + 1), coords))
 
-    
     if shape is None:
-        max_values = np.vstack([el.max(axis = 0) for el in coords.values()]).max(axis = 0)
+        max_values = np.vstack([el.max(axis=0) for el in coords.values()]).max(axis=0)
         shape = (max_values[0] + 10, max_values[1] + 10)
 
     bg = np.zeros(shape, np.uint8)
 
     for id, coord_list in coords.items():
-        bg[coord_list[:,0], coord_list[:,1]] = id
+        bg[coord_list[:, 0], coord_list[:, 1]] = id
 
     lut = get_lut()
 
@@ -192,21 +226,54 @@ def image_from_coords(coords: dict|list, shape: Optional[Tuple[int, int]] = None
     if not labels is None:
         if isinstance(labels, list):
             if len(labels) != len(coords):
-                raise ValueError("There must be exactly as many labels as coordinate lists to plot")
+                raise ValueError(
+                    "There must be exactly as many labels as coordinate lists to plot"
+                )
         else:
             labels = list(coords.keys())
-    
+
         # This has memory overhead and isn't optimal, but there isn't a really good ways to iterate over a dictionary and a list at the same time
 
         coords = list(coords.values())
 
         for idx in range(len(coords)):
-            cv2.putText(clr_img,
-                        str(labels[idx]),
-                        tuple(np.mean(coords[idx], 0).astype(np.uint32)[[1,0]]),
-                        cv2.FONT_HERSHEY_SCRIPT_SIMPLEX,
-                        0.7,
-                        (255, 255, 255),
-                        2)
+            cv2.putText(
+                clr_img,
+                str(labels[idx]),
+                tuple(np.mean(coords[idx], 0).astype(np.uint32)[[1, 0]]),
+                cv2.FONT_HERSHEY_SCRIPT_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
 
     return clr_img
+
+
+def to_coord_lists(edge_image: np.ndarray) -> dict:
+    # Label connected components
+    labels = skimage.measure.label(edge_image, background=0, connectivity=2)
+
+    # Most fast ways to do this only work on 1d arrays, so we flatten out the array first and get the indices for each unique element then
+    # after which we stich everything back together to get 2d indices
+
+    labels_flat = labels.ravel()
+    labels_flat_sorted = np.argsort(labels_flat)
+    keys, indices_flattend = np.unique(
+        labels_flat[labels_flat_sorted], return_index=True
+    )
+    labels_ndims = np.unravel_index(labels_flat_sorted, labels.shape)
+    labels_ndims = np.c_[labels_ndims] if labels.ndim > 1 else labels_flat_sorted
+    indices = np.split(labels_ndims, indices_flattend[1:])
+    coords = dict(zip(keys, indices))
+
+    # We can most likely get away with just deleting the first element (as it should always be 0, meaning the background)
+    coords.pop(0, None)
+
+    logger = logging.getLogger()
+
+    if logger.isEnabledFor(logging.DEBUG):
+        image = image_from_coords(indices, edge_image.shape, keys)
+        cv2.imwrite(os.path.join("debug_data", "labels.jpg"), image)
+
+    return coords

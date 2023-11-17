@@ -68,3 +68,8 @@ debug_data/*
 # Just macOS things..
 
 .DS_Store
+*.jpg
+*.JPG
+*.JPEG
+*.jpeg
+*.csv

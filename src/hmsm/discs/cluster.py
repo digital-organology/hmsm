@@ -92,7 +92,7 @@ def process_disc(
 
     # Convert to coordinates
 
-    coords = hmsm.discs.utils.to_coord_lists(edges)
+    coords = hmsm.utils.to_coord_lists(edges)
 
     # Get the outer edge of the disc for distance calculationsä
     # We currently do this by getting the biggest edge of our edge list (which should always be the outer disc edge)
@@ -133,7 +133,7 @@ def process_disc(
     ]
 
     midi_file = hmsm.midi.create_midi(
-        timing_data[:, 1].tolist(), timing_data[:, 3].tolist(), midi_notes
+        timing_data[:, 1].tolist(), timing_data[:, 3].tolist(), midi_notes, 320
     )
 
     midi_file.save(output_path)
