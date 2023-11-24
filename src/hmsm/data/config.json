@@ -938,7 +938,8 @@
         "hole_width_mm": 1.7,
         "binarization_method": "v_channel",
         "binarization_options": {
-            "threshold": 0.1
+            "threshold": 0.1,
+            "upper_threshold": 0.75
         },
         "track_measurements": [
             {
@@ -1441,7 +1442,8 @@
         "hole_width_mm": 1.5,
         "binarization_method": "v_channel",
         "binarization_options": {
-            "threshold": 0.15
+            "threshold": 0.15,
+            "upper_threshold": 0.75
         },
         "track_measurements": [
             {

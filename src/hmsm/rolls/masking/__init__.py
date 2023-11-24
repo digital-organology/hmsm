@@ -78,7 +78,7 @@ class MaskGenerator:
             raise
 
         try:
-            mask = generator_method(chunk, self.bg_color, **self.parameters)
+            mask = generator_method(self, chunk, self.bg_color, **self.parameters)
         except TypeError:
             logging.error(
                 "Invalid parameters were supplied to the binarization/masking method. See the original exception for details."

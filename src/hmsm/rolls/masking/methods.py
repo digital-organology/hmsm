@@ -1,14 +1,20 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
-from typing import Dict
+import random
+from typing import Dict, Optional
 
+import cv2
 import numpy as np
 import skimage.color
 import skimage.morphology
 
 
 def v_channel(
-    image: np.ndarray, bg_color: str, threshold: float
+    generator,
+    image: np.ndarray,
+    bg_color: str,
+    threshold: float,
+    upper_threshold: Optional[float] = None,
 ) -> Dict[str, np.ndarray]:
     """Creates a mask for the holes on the role by using thresholding on the v channel of the image
 
@@ -29,4 +35,52 @@ def v_channel(
     footprint = skimage.morphology.diamond(3)
     image = skimage.morphology.binary_opening(image, footprint)
     image = skimage.morphology.binary_closing(image, footprint)
-    return {"holes": image}
+
+    if upper_threshold is None:
+        return {"holes": image}
+
+    holes_dilated = skimage.morphology.binary_dilation(image, footprint)
+    annotations = (np.invert(holes_dilated)) & (v_channel < 0.75)
+    annotations = skimage.morphology.binary_opening(annotations, footprint)
+    return {"holes": image, "annotations": annotations}
+
+
+# def _estimate_annotation_pararameters(
+#     generator: hmsm.rolls.masking.MaskGenerator,
+#     image: np.ndarray,
+#     bg_color: str,
+#     threshold: float,
+# ) -> None:
+#     sample_indices = random.sample(
+#         range(int(image.shape[0] * 0.2), int(image.shape[0] * 0.8)), 5
+#     )
+#     stop_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, 0.2)
+#     footprint = skimage.morphology.diamond(3)
+
+#     for idx in sample_indices:
+#         chunk = image[idx : idx + 4000, :]
+#         v_channel = (chunk / 255).max(axis=2)
+#         mask_holes = (
+#             v_channel < threshold if bg_color == "black" else v_channel > threshold
+#         )
+#         mask_holes = skimage.morphology.binary_dilation(mask_holes, footprint)
+
+#         pixels = chunk[mask_holes == False].reshape((-1, 3))
+#         pixels = np.float32(pixels)
+#         _, labels, (centers) = cv2.kmeans(
+#             pixels, 2, None, stop_criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+#         )
+
+#     cluster_centers = []
+#     pass
+
+
+# def v_channel_with_rgb_segmentation(
+#     generator: MaskGenerator,
+#     image: np.ndarray,
+#     bg_color: str,
+#     threshold: float,
+# ) -> Dict[str, np.ndarray]:
+#     if not hasattr(generator, "cluster_centers"):
+#         _estimate_annotation_pararameters(generator, image, bg_color, threshold)
+#     pass

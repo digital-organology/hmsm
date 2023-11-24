@@ -29,9 +29,15 @@ class MidiGenerator:
         note_length: List[float],
         midi_note: List[int],
         hole_size_mm: Optional[float] = None,
+        dynamics_line: Optional[np.ndarray] = None,
     ) -> None:
         # TODO: Scheduled for rewrite once we get a better grasp of what we actually need
         assert len(note_start) == len(note_length) == len(midi_note)
+
+        VELOCITY_BASE = 64
+        VELOCITY_BOOST_AMOUNT = 30
+        VELOCITY_BASE_MIN = 50
+        VELOCITY_BASE_MAX = 100
 
         note_start = np.array(note_start)
         note_length = np.array(note_length)
@@ -47,6 +53,14 @@ class MidiGenerator:
             )
 
         events = list()
+
+        if dynamics_line is not None:
+            min_vel = int(dynamics_line[:, 1].min())
+            max_vel = int(dynamics_line[:, 1].max())
+
+            velocity_factor = (VELOCITY_BASE_MAX - VELOCITY_BASE_MIN) / (
+                int(dynamics_line[:, 1].max()) - min_vel
+            )
 
         if -3 in control_codes:
             merging_threshold = (
@@ -94,27 +108,49 @@ class MidiGenerator:
 
         for row in music_data:
             if row[2] > 0:
-                velocity = 64
+                # Set velocity according to dynamics line or a flat value if there is none
+                if dynamics_line is not None:
+                    if row[0] < dynamics_line[0, 0]:
+                        velocity = int(
+                            (dynamics_line[0, 1] - min_vel) * velocity_factor
+                            + VELOCITY_BASE_MIN
+                        )
+                    elif row[0] > dynamics_line[-1, 0]:
+                        velocity = int(
+                            (dynamics_line[-1, 1] - min_vel) * velocity_factor
+                            + VELOCITY_BASE_MIN
+                        )
+                    else:
+                        velocity = int(
+                            (dynamics_line[dynamics_line[:, 0] == row[0], 1] - min_vel)
+                            * velocity_factor
+                            + VELOCITY_BASE_MIN
+                        )
+                else:
+                    velocity = VELOCITY_BASE
+
+                # Apply boost if roll has one
+
                 if has_velocity_control:
                     if row[2] <= 64:
                         velocity = (
-                            100
+                            min(velocity + VELOCITY_BOOST_AMOUNT, 127)
                             if (
                                 np.isin(velocity_boost[:, 2], [-10, -11])
                                 & (velocity_boost[:, 0] < row[0])
                                 & (velocity_boost[:, 1] > row[0])
                             ).any()
-                            else 64
+                            else velocity
                         )
                     elif row[2] > 64:
                         velocity = (
-                            100
+                            min(velocity + VELOCITY_BOOST_AMOUNT, 127)
                             if (
                                 np.isin(velocity_boost[:, 2], [-20, -21])
                                 & (velocity_boost[:, 0] < row[0])
                                 & (velocity_boost[:, 1] > row[0])
                             ).any()
-                            else 64
+                            else velocity
                         )
 
                 events.append(

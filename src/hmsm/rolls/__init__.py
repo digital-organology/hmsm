@@ -2,7 +2,9 @@
 
 import datetime
 import functools
+import itertools
 import logging
+import math
 import os
 import traceback
 from typing import List, Optional, Tuple
@@ -99,6 +101,8 @@ def process_roll(
             unit="chunks",
         )
 
+    dyn_line = []
+
     for bounds, masks in iter(generator):
         if not _has_enlighten:
             logging.info(f"Processing chunk from {bounds[0]} to {bounds[1]}")
@@ -116,6 +120,14 @@ def process_roll(
                 f"Encountere an exception when trying to process the chunk [{bounds[0]}, {bounds[1]}] will assume that this is because the roll is finished and stop processing. Exception encountered: {traceback.format_exc()}"
             )
             break
+
+        if "annotations" in masks:
+            dyn = _process_annotations(masks["annotations"], bounds[0])
+            dyn_line.append(dyn)
+            # skimage.io.imsave(
+            #     f"annotations_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.jpg",
+            #     masks["annotations"],
+            # )
 
         if notes is not None:
             notes[:, 0:2] = notes[:, 0:2] + bounds[0]
@@ -135,7 +147,10 @@ def process_roll(
 
     logging.info("Post-processing extracted data...")
 
-    note_data = merge_notes(note_data)
+    if dyn_line:
+        dyn_line = _postprocess_dynamics_line(dyn_line)
+
+    note_data = merge_notes(note_data, config["hole_width_mm"])
 
     note_start = (note_data[:, 0]).tolist()
     note_duration = (note_data[:, 1] - note_data[:, 0]).tolist()
@@ -150,7 +165,11 @@ def process_roll(
 
     midi_generator = hmsm.midi.MidiGenerator(3)
     midi_generator.make_midi(
-        note_start, note_duration, midi_tone, config["hole_width_mm"]
+        note_start,
+        note_duration,
+        midi_tone,
+        config["hole_width_mm"],
+        dyn_line,
     )
 
     logging.info(f"Writing midi file to {output_path}")
@@ -160,7 +179,101 @@ def process_roll(
     logging.info("Done, bye")
 
 
-def merge_notes(notes: np.ndarray) -> np.ndarray:
+def _postprocess_dynamics_line(line: list):
+    line = list(itertools.chain(*line))
+    line = np.vstack(line).astype(np.uint32)
+
+    dists = scipy.spatial.distance.cdist(line, line)
+    dists[dists == 0] = float("inf")
+
+    closest_node = dists.min(axis=0).astype(np.uint16)
+
+    NODE_DISTANCE_THRESHOLD = 2.5 * np.mean(closest_node)
+
+    # keep = closest_node <= NODE_DISTANCE_THRESHOLD
+
+    keep = (dists <= NODE_DISTANCE_THRESHOLD).sum(axis=0) > 2
+
+    line = line[keep, :]
+
+    line = line[line[:, 0].argsort(), :]
+
+    # line_interpolated = np.arange(line[:, 0].min(), line[:, 0].max())
+
+    # line_interpolated = np.column_stack(
+    #     (line_interpolated, np.zeros_like(line_interpolated))
+    # )
+
+    # Prepare points on line data
+
+    groups = line[:, 0].copy()
+    line = np.delete(line, 0, axis=1)
+
+    _id, _pos, g_count = np.unique(groups, return_index=True, return_counts=True)
+
+    g_sum = np.add.reduceat(line[groups.argsort()], _pos, axis=0)
+    g_mean = g_sum / g_count[:, None]
+    line = np.column_stack((_id, g_mean)).astype(np.uint32)
+
+    current_point = line[0, :]
+
+    line_interpolated = []
+    line_interpolated.append(current_point[1])
+
+    for i in range(1, len(line)):
+        next_point = line[i, :]
+
+        if (next_point[0] - current_point[0]) > 1:
+            m = (int(next_point[1]) - int(current_point[1])) / (
+                int(next_point[0]) - int(current_point[0])
+            )
+
+            b = int(current_point[1]) - (m * int(current_point[0]))
+
+            line_interpolated.append(
+                np.arange(current_point[0] + 1, next_point[0]) * m + b
+            )
+
+        line_interpolated.append(next_point[1])
+        current_point = next_point
+
+    line_interpolated = (
+        np.column_stack(
+            (
+                np.arange(line[:, 0].min(), (line[:, 0].max() + 1)),
+                np.hstack(line_interpolated),
+            )
+        )
+        .round()
+        .astype(np.uint32)
+    )
+
+    line_interpolated[:, 1] = scipy.signal.savgol_filter(
+        line_interpolated[:, 1], 500, 2
+    ).round()
+
+    return line_interpolated
+
+
+def _process_annotations(mask: np.ndarray, offset: int) -> np.ndarray:
+    # coords = np.argwhere(mask)
+    # uq = np.unique(np.argwhere(mask)[:, 0], return_index=True)
+    # annots = dict(zip(uq[0] + offset, np.split(coords[:, 1], uq[1][1:])))
+    MIN_NUM_PIXELS = 200
+
+    coords = hmsm.utils.to_coord_lists(mask)
+    coords = list(coords.values())
+    for val in coords:
+        val[:, 0] = val[:, 0] + offset
+
+    coords = [val for val in coords if len(val) >= MIN_NUM_PIXELS]
+
+    coords = [np.mean(val, axis=0) for val in coords]
+
+    return coords
+
+
+def merge_notes(notes: np.ndarray, hole_size_mm: Optional[float]) -> np.ndarray:
     """Merge notes that sound as one
 
     On original playback devices holes that are closely grouped will sound as a single, longer note.
@@ -172,10 +285,16 @@ def merge_notes(notes: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Input array with close notes merged
     """
+    CORRECTION_FACTOR = 1.75
+
     offset = notes[:, 0].min()
     notes[:, 0:2] = notes[:, 0:2] - offset
 
-    merge_threshold = round(np.mean(notes[:, 1] - notes[:, 0]) * 2)
+    merge_threshold = (
+        CORRECTION_FACTOR * math.floor(hole_size_mm / 25.4 * 300)
+        if hole_size_mm is not None
+        else round(np.mean(notes[:, 1] - notes[:, 0]) * CORRECTION_FACTOR)
+    )
 
     midi_notes = np.unique(notes[:, 2])
 
@@ -186,16 +305,30 @@ def merge_notes(notes: np.ndarray) -> np.ndarray:
 
     for tone in midi_notes:
         tone_notes = notes[notes[:, 2] == tone, :]
-        note_start_idx = (
-            np.diff(tone_notes[:, 0], prepend=(merge_threshold * -1 - 1))
-            > merge_threshold
-        )
-        note_end_idx = np.roll(note_start_idx, -1)
 
-        tone_notes_merged = tone_notes[note_start_idx, :]
-        tone_notes_merged[:, 1] = tone_notes[note_end_idx, 1]
+        current_row = tone_notes[0, :]
 
-        notes_merged.append(tone_notes_merged)
+        for i in range(1, len(tone_notes)):
+            if (tone_notes[i, 0] - tone_notes[i - 1, 1]) < merge_threshold:
+                current_row[1] = tone_notes[i, 1]
+            else:
+                notes_merged.append(current_row)
+                current_row = tone_notes[i, :]
+
+        notes_merged.append(current_row)
+
+    # rows.append(current_row)
+
+    #     note_start_idx = (
+    #         np.diff(tone_notes[:, 0], prepend=(merge_threshold * -1 - 1))
+    #         > merge_threshold
+    #     )
+    #     note_end_idx = np.roll(note_start_idx, -1)
+
+    #     tone_notes_merged = tone_notes[note_start_idx, :]
+    #     tone_notes_merged[:, 1] = tone_notes[note_end_idx, 1]
+
+    #     notes_merged.append(tone_notes_merged)
 
     notes_merged = np.vstack(notes_merged)
 
