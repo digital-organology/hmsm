@@ -26,7 +26,7 @@ For additional information on this, see [CONFIG.md](docs/CONFIG.md).
 To process a roll, use the provided `roll2midi` utility, like so:
 
 ```{bash}
-roll2midi -c clavitist -t 60 hupfeld_animatic_roll.tif out.mid 
+roll2midi -c animatic -t 60 hupfeld_animatic_roll.tif out.mid 
 ```
 
 This will:
