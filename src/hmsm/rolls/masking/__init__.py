@@ -2,6 +2,7 @@
 
 import logging
 import math
+import traceback
 from typing import List, Optional, Self, Tuple
 
 import numpy as np
@@ -120,7 +121,15 @@ class MaskGenerator:
         )
         self._current_idx = end_idx
 
-        return ((start_idx, end_idx), self.get_masks((start_idx, end_idx)))
+        try:
+            masks = self.get_masks((start_idx, end_idx))
+        except Exception:
+            # logging.warning(
+            #     f"Encountered the following exception when generating masks: \n{traceback.format_exc()}"
+            # )
+            masks = None
+
+        return ((start_idx, end_idx), masks)
 
     def get_number_iterations(self) -> int:
         """Returns the number of remaining iterations

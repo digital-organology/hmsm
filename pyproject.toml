@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hmsm"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
     {name = "David Fuhry", email = "david.fuhry@uni-leipzig.de"}
 ]
@@ -13,7 +13,7 @@ license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"
 readme = {file = "README.md", content-type="text/markdown"}
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-midi2disc = ["cairosvg"]
+midi2disc = ["cairosvg", "vnoise"]
 progressbar = ["enlighten"]
 
 [project.urls]

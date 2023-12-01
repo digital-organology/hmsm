@@ -37,7 +37,7 @@ def process_roll(
     bg_color: Optional[str] = "guess",
     chunk_size: Optional[int] = 4000,
     skip_lines: Optional[int] = 0,
-    parameter_estimation_chunks: Optional[int] = 5,
+    tempo: Optional[int] = 50,
 ) -> None:
     """Main processing function for piano rolls
 
@@ -50,7 +50,7 @@ def process_roll(
         bg_color (Optional[str], optional): Color of the background in the supplied roll scan. Must currently be one of 'black' and 'white' or 'guess' in which case it will be attempted to infer the color from the supplied scan. Defaults to "guess".
         chunk_size (Optional[int], optional): Vertical size of chunks to segment the image to for processing. Defaults to 4000.
         skip_lines (Optional[int], optional): Number of lines to skip from the beginning of the roll scan, useful for excluding the roll head from beeing processed. Defaults to 0.
-        parameter_estimation_chunks (Optional[int], optional): Number of chunks to generate for estimating required digitization parameters. Higher numbers should improve accuracy but will have a negative performance impact. Defaults to 5.
+        tempo (Optional[int], optional): Tempo of the roll in feet-per-minute times 10. Defaults to 50.
     """
     logging.info(f"Reading input image from {input_path}...")
 
@@ -92,6 +92,11 @@ def process_roll(
     note_data = list()
 
     width_bounds = _calculate_hole_width_range(config["hole_width_mm"])
+    hole_width = (
+        config["hole_width_mm"][0]
+        if isinstance(config["hole_width_mm"], list)
+        else config["hole_width_mm"]
+    )
 
     if _has_enlighten:
         manager = enlighten.get_manager()
@@ -102,36 +107,67 @@ def process_roll(
         )
 
     dyn_line = []
+    pedal_markers = []
+
+    good_chunk_found = False
 
     for bounds, masks in iter(generator):
         if not _has_enlighten:
             logging.info(f"Processing chunk from {bounds[0]} to {bounds[1]}")
 
-        try:
-            left_edge, right_edge = _get_roll_edges(masks["holes"])
-            notes, alignment_grid = extract_note_data(
-                masks["holes"],
-                (left_edge, right_edge),
-                alignment_grid,
-                width_bounds,
-            )
-        except Exception as e:
-            logging.warning(
-                f"Encountere an exception when trying to process the chunk [{bounds[0]}, {bounds[1]}] will assume that this is because the roll is finished and stop processing. Exception encountered: {traceback.format_exc()}"
-            )
-            break
+        if masks is None:
+            if good_chunk_found == False:
+                logging.info(
+                    f"Chunk {bounds[0]} to {bounds[0]} failed to process at the roll start and will be skipped"
+                )
+                continue
+            else:
+                logging.info(
+                    f"Chunk {bounds[0]} to {bounds[0]} failed to process, this likely indicates the roll end."
+                )
+                break
+
+        left_edge, right_edge = masks["edges"]
+
+        if good_chunk_found == False and (
+            (left_edge.max() - left_edge.min()) > 250
+            or (right_edge.max() - right_edge.min()) > 250
+        ):
+            start_idx = _find_roll_start(left_edge, right_edge, image.shape[1])
+            if start_idx is None:
+                logging.info(
+                    f"Chunk {bounds[0]} to {bounds[1]} appears to be faulty, this might be because it contains the roll head or because of defects with the roll scan, skipping"
+                )
+                continue
+            masks = {
+                k: v[start_idx:, :] if isinstance(v, np.ndarray) else v
+                for k, v in masks.items()
+            }
+
+        notes, alignment_grid = extract_note_data(
+            masks["holes"],
+            (left_edge, right_edge),
+            alignment_grid,
+            width_bounds,
+        )
 
         if "annotations" in masks:
-            dyn = _process_annotations(masks["annotations"], bounds[0])
+            if "pedal_cutoff" in config:
+                dyn, pedal = _process_annotations(
+                    masks["annotations"],
+                    bounds[0],
+                    (left_edge, right_edge),
+                    config["pedal_cutoff"],
+                )
+                pedal_markers.append(pedal)
+            else:
+                dyn = _process_annotations(masks["annotations"], bounds[0])
             dyn_line.append(dyn)
-            # skimage.io.imsave(
-            #     f"annotations_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.jpg",
-            #     masks["annotations"],
-            # )
 
         if notes is not None:
             notes[:, 0:2] = notes[:, 0:2] + bounds[0]
             note_data.append(notes)
+            good_chunk_found = True
 
         if _has_enlighten:
             progress_bar.update()
@@ -148,9 +184,14 @@ def process_roll(
     logging.info("Post-processing extracted data...")
 
     if dyn_line:
+        logging.info("Processing dynamics annotations")
         dyn_line = _postprocess_dynamics_line(dyn_line)
 
-    note_data = merge_notes(note_data, config["hole_width_mm"])
+    if pedal_markers:
+        pedal_markers = _postprocess_pedal_markers(pedal_markers)
+        note_data = np.vstack([note_data, pedal_markers])
+
+    note_data = merge_notes(note_data, hole_width)
 
     note_start = (note_data[:, 0]).tolist()
     note_duration = (note_data[:, 1] - note_data[:, 0]).tolist()
@@ -163,12 +204,12 @@ def process_roll(
 
     logging.info("Finished post processing, generating midi data...")
 
-    midi_generator = hmsm.midi.MidiGenerator(3)
+    midi_generator = hmsm.midi.MidiGenerator(tempo)
     midi_generator.make_midi(
         note_start,
         note_duration,
         midi_tone,
-        config["hole_width_mm"],
+        hole_width,
         dyn_line,
     )
 
@@ -179,7 +220,128 @@ def process_roll(
     logging.info("Done, bye")
 
 
-def _postprocess_dynamics_line(line: list):
+def _postprocess_pedal_markers(markers: list) -> np.ndarray:
+    """Postprocess printed pedal annotations
+
+    This will take the data generated by the annotation processing method and
+    transform it into data points that can be used to set pedal signals in the midi creationb process
+
+    Args:
+        markers (list): Pedal marks found in the annotations
+
+    Returns:
+        np.ndarray: Processed pedal control information
+    """
+    markers = list(itertools.chain(*markers))
+    markers = np.vstack(markers)
+
+    markers = markers[markers[:, 1] > 3000]
+
+    markers = markers[markers[:, 0].argsort()]
+
+    for i in range(1, len(markers)):
+        if markers[i, 0] - markers[i - 1, 0] <= 100:
+            markers[i - 1, 1] = markers[i - 1, 1] + markers[i, 1]
+            markers[i - 1, 2] = max(markers[i - 1, 2], markers[i, 2])
+            markers[i - 1, 3] = min(markers[i - 1, 3], markers[i, 3])
+            markers[i, 1] = 0
+
+    markers = markers[markers[:, 1] > 0]
+
+    markers = np.c_[markers, markers[:, 2] - markers[:, 3]]
+    markers[:, 4] = markers[:, 2] - markers[:, 3]
+
+    cutoffs = np.mean(markers, axis=0)
+
+    notes = list()
+    note_start = None
+
+    for i in range(0, len(markers)):
+        if markers[i, 4] > cutoffs[4]:
+            # If the previous marker was a pedal start we check if the next marker is a start marker
+            # if it is we most likely got this one wrong and it is an end marker
+            # If it isnt we most likely missed the previous end marker and overwrite
+            if note_start is None or markers[i + 1, 4] < cutoffs[4]:
+                note_start = markers[i, 0]
+            else:
+                notes.append(
+                    np.array(
+                        [
+                            note_start,
+                            markers[i, 0],
+                            -3,
+                        ]
+                    )
+                )
+                note_start = None
+        else:
+            # Basically the same thing as before: If the previous marker was an end marker we check the next marker.
+            # If it also is an end marker we assume we got this one wrong and set it as a start marker.
+            # If it is a start marker we might have missed the corresponding start marker and discard this data point
+            if note_start is not None:
+                notes.append(
+                    np.array(
+                        [
+                            note_start,
+                            markers[i, 0],
+                            -3,
+                        ]
+                    )
+                )
+                note_start = None
+            elif markers[i + 1, 4] < cutoffs[4]:
+                note_start = markers[i, 0]
+
+    return np.vstack(notes)
+
+
+def _find_roll_start(
+    left_edge: np.ndarray, right_edge: np.ndarray, image_width: int
+) -> int | None:
+    """Find the beginning of the roll
+
+    Will attempt to find the point at which the roll begins to be straight from the detected
+    edges of the roll. Note that this approach is imperfect, some rolls have labels even beyond the triangular roll head.
+
+    Args:
+        left_edge (np.ndarray): Array of the detected positions of the left roll edge
+        right_edge (np.ndarray): Array of the detected positions of the right roll edge
+        image_width (int): Width of the image beeing processed
+
+    Returns:
+        int | None: Index at which the roll beginns beeing straight or None if it can't be found
+    """
+    assert len(left_edge) == len(right_edge)
+
+    SHIFT_THRESHOLD = 20
+
+    max_idx = len(left_edge) - 1
+
+    for i in reversed(range(0, len(left_edge), 100)):
+        segment_left = left_edge[i:max_idx]
+        segment_right = right_edge[i:max_idx]
+        if (
+            (segment_left.max() - segment_left.min()) > SHIFT_THRESHOLD
+            or (segment_right.max() - segment_right.min()) > SHIFT_THRESHOLD
+        ) or (segment_left.mean() < 5 and segment_right.mean() > (image_width * 0.99)):
+            return i if max_idx != len(left_edge) - 1 else None
+        max_idx = i
+
+    return 0
+
+
+def _postprocess_dynamics_line(line: list) -> np.ndarray:
+    """Process printed dynamics annotations
+
+    Will take the elements detected on the dynamics line and interpolate
+    dynamics measures for every point between the first and last provided points
+
+    Args:
+        line (list): List containing coordinates of nodes detected as dynamics annotations
+
+    Returns:
+        np.ndarray: Interpolated dynamics values for the entire area covered by the provided data
+    """
     line = list(itertools.chain(*line))
     line = np.vstack(line).astype(np.uint32)
 
@@ -255,25 +417,69 @@ def _postprocess_dynamics_line(line: list):
     return line_interpolated
 
 
-def _process_annotations(mask: np.ndarray, offset: int) -> np.ndarray:
-    # coords = np.argwhere(mask)
-    # uq = np.unique(np.argwhere(mask)[:, 0], return_index=True)
-    # annots = dict(zip(uq[0] + offset, np.split(coords[:, 1], uq[1][1:])))
-    MIN_NUM_PIXELS = 200
+def _process_annotations(
+    mask: np.ndarray,
+    offset: Optional[int] = 0,
+    edges: Optional[tuple] = None,
+    pedal_cutoff: Optional[float] = None,
+) -> List | Tuple[List, List]:
+    """Extract annotated information from mask
+
+    Will process the mask and extract information for the printed dynamics line and (if present) printed pedal annotations
+
+    Args:
+        mask (np.ndarray): Binary mask of the printed annotations
+        offset (int): Offset of the chunk that mask represents, will be used to adjust position information
+        edges (Optional[tuple], optional): Tuple containing positions of the roll edges. Only required if pedal markers are present on the roll. Defaults to None.
+        pedal_cutoff (Optional[float], optional): Relative cutoff point (from the left side of the roll) at which the pedal annotations stop and the dynamics line begins. Defaults to None.
+
+    Returns:
+        List | Tuple[List, List]: The extracted annotation data
+    """
+    MIN_NUM_PIXELS = 200 if pedal_cutoff is None else 250
+
+    if pedal_cutoff is not None:
+        mask = skimage.morphology.binary_dilation(mask, skimage.morphology.diamond(5))
 
     coords = hmsm.utils.to_coord_lists(mask)
     coords = list(coords.values())
     for val in coords:
         val[:, 0] = val[:, 0] + offset
 
-    coords = [val for val in coords if len(val) >= MIN_NUM_PIXELS]
+    coords = [val for val in coords if len(val) >= MIN_NUM_PIXELS and len(val) <= 20000]
 
-    coords = [np.mean(val, axis=0) for val in coords]
+    if pedal_cutoff is not None:
+        pedal = list()
+        dyn_line = list()
+        for val in coords:
+            y, x = tuple(np.mean(val, axis=0).astype(int))
+            if ((edges[1][y - offset] - edges[0][y - offset]) * pedal_cutoff) + edges[
+                0
+            ][y - offset] > x:
+                pedal.append(
+                    np.array(
+                        (
+                            y,
+                            len(val),
+                            val.max(axis=0)[1] - edges[0][y - offset],
+                            val.min(axis=0)[1] - edges[0][y - offset],
+                        )
+                    )
+                )
+            else:
+                dyn_line.append(np.mean(val, axis=0))
+    else:
+        dyn_line = [np.mean(val, axis=0) for val in coords]
 
-    return coords
+    if pedal_cutoff is not None:
+        return dyn_line, pedal
+    return dyn_line
 
 
-def merge_notes(notes: np.ndarray, hole_size_mm: Optional[float]) -> np.ndarray:
+def merge_notes(
+    notes: np.ndarray,
+    hole_size_mm: Optional[float],
+) -> np.ndarray:
     """Merge notes that sound as one
 
     On original playback devices holes that are closely grouped will sound as a single, longer note.
@@ -336,7 +542,7 @@ def merge_notes(notes: np.ndarray, hole_size_mm: Optional[float]) -> np.ndarray:
 
 
 def _calculate_hole_width_range(
-    width_mm: float,
+    width_mm: float | List[float],
     tolerances: Optional[Tuple[float, float]] = (0.5, 1.25),
     resolution: Optional[int] = 300,
 ) -> Tuple[int, int]:
@@ -350,12 +556,20 @@ def _calculate_hole_width_range(
     Returns:
         Tuple[int, int]: Lower and upper bounds for component filtering, in pixels
     """
-    # TODO: Make this work for rolls that have multiple types of holes
-    bounds = (
-        int(width_mm / 25.4 * resolution * tolerances[0]),
-        int(width_mm / 25.4 * resolution * tolerances[1]),
+    tolerances = (
+        (tolerances[0], tolerances[1]) if tolerances[0] < tolerances[1] else tolerances
     )
-    return bounds if bounds[1] > bounds[0] else (bounds[1], bounds[0])
+
+    width_mm = list(width_mm) if isinstance(width_mm, float) else width_mm
+
+    bounds_min = min(
+        [int(width / 25.4 * resolution * tolerances[0]) for width in width_mm]
+    )
+    bounds_max = max(
+        [int(width / 25.4 * resolution * tolerances[1]) for width in width_mm]
+    )
+
+    return (bounds_min, bounds_max)
 
 
 def extract_note_data(
@@ -462,33 +676,6 @@ def extract_note_data(
         )
 
     return (np.vstack(note_data), alignment_grid)
-
-
-def _get_roll_edges(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Finds the edges of the piano roll from the given mask
-
-    Args:
-        mask (np.ndarray): Mask that is binarized to be True where the roll is and False everywhere else
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: Two one dimensional arrays that contain the position of the roll edge along the given mask
-    """
-    if mask[0, 0] == True:
-        mask = np.invert(mask)
-
-    mask = skimage.morphology.binary_closing(mask, skimage.morphology.diamond(5))
-
-    rows, cols = np.where(mask)
-
-    _, idx = np.unique(rows, return_index=True)
-
-    left_edge = np.minimum.reduceat(cols, idx)
-    left_edge = scipy.signal.savgol_filter(left_edge, 20, 3).round()
-
-    right_edge = np.maximum.reduceat(cols, idx)
-    right_edge = scipy.signal.savgol_filter(right_edge, 20, 3).round()
-
-    return (left_edge, right_edge)
 
 
 def _filter_component(

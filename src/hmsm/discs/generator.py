@@ -7,8 +7,13 @@ import os
 import cv2
 import mido
 import numpy as np
-import skimage.morphology
-import vnoise
+
+try:
+    import vnoise
+except ImportError:
+    _has_vnoise = False
+else:
+    _has_vnoise = True
 
 try:
     import cairosvg
@@ -598,6 +603,11 @@ def _apply_noise(canvas: np.ndarray, disc_mask: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Input image with perlin noise applied
     """
+    if not _has_vnoise:
+        raise ImportError(
+            "This function requires the optional dependency vnoise to be installed"
+        )
+
     noise = vnoise.Noise()
 
     canvas = cv2.cvtColor(canvas, cv2.COLOR_RGB2HSV)

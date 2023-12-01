@@ -15,10 +15,16 @@ class MidiGenerator:
 
     _midi_file: mido.MidiFile = None
 
-    _control_codes: dict = {-3: 64}
+    _control_codes: dict = {
+        -3: None,
+        -10: None,
+        -11: None,
+        -20: None,
+        -21: None,
+    }
 
-    def __init__(self, scaling_factor: Optional[float] = 1.0) -> Self:
-        self._scaling_factor = scaling_factor
+    def __init__(self, fpm: Optional[int] = 50) -> Self:
+        self._scaling_factor = 1 / ((fpm * 12 * 300) / 600)
 
     def write_midi(self, path: str) -> None:
         self._midi_file.save(path)
@@ -34,9 +40,10 @@ class MidiGenerator:
         # TODO: Scheduled for rewrite once we get a better grasp of what we actually need
         assert len(note_start) == len(note_length) == len(midi_note)
 
+        INVERT_PEDAL = False
         VELOCITY_BASE = 64
-        VELOCITY_BOOST_AMOUNT = 30
-        VELOCITY_BASE_MIN = 50
+        VELOCITY_BOOST_AMOUNT = 18
+        VELOCITY_BASE_MIN = 40
         VELOCITY_BASE_MAX = 100
 
         note_start = np.array(note_start)
@@ -85,7 +92,7 @@ class MidiGenerator:
                         "control_change",
                         0,
                         64,
-                        127,
+                        127 if INVERT_PEDAL else 0,
                     ]
                 )
             )
@@ -173,7 +180,7 @@ class MidiGenerator:
                             "control_change",
                             row[0] * self._scaling_factor,
                             64,
-                            0,
+                            0 if INVERT_PEDAL else 127,
                         ]
                     )
                 )
@@ -183,7 +190,7 @@ class MidiGenerator:
                             "control_change",
                             (row[0] + row[1]) * self._scaling_factor,
                             64,
-                            127,
+                            127 if INVERT_PEDAL else 0,
                         ]
                     )
                 )
@@ -196,12 +203,27 @@ class MidiGenerator:
 
         # Convert into time deltas and also round to ticks
 
+        tempo = mido.bpm2tempo(120)
+        TICKS_PER_BEAT = 960
+
         events = [
             [
                 events[n][0],
-                round(events[n][1] - events[n - 1][1])
+                round(
+                    mido.second2tick(
+                        events[n][1] - events[n - 1][1],
+                        TICKS_PER_BEAT,
+                        tempo,
+                    )
+                )
                 if n > 0
-                else round(events[n][1]),
+                else round(
+                    mido.second2tick(
+                        events[n][1],
+                        TICKS_PER_BEAT,
+                        tempo,
+                    )
+                ),
                 events[n][2],
                 *(list() if len(events[n]) <= 3 else events[n][3:]),
             ]
@@ -211,10 +233,12 @@ class MidiGenerator:
         # Initialize midi file
 
         midi_file = mido.MidiFile()
-        midi_file.ticks_per_beat = 960
+        midi_file.ticks_per_beat = TICKS_PER_BEAT
 
         track = mido.MidiTrack()
         midi_file.tracks.append(track)
+
+        track.append(mido.MetaMessage("set_tempo", tempo=tempo, time=0))
 
         for event in events:
             if event[0] == "control_change":

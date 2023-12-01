@@ -20,20 +20,20 @@ For additional installation information see [INSTALL.md](docs/INSTALL.md).
 ### Piano Roll Digitization
 
 We support digitization for a number of formats of piano rolls out of the box, for an overview see [FORMATS.md](docs/FORMATS.md).
-Support for additional formats in our collection is currently beeing added along with extending the support for control information present on the formats already supported.
-The application also ships with the `roll2config` tool which can be used to get a headstart in the creation of a processing profile for new formats.
+If you miss support for a format of interest for you, we provide tooling to help you create configuration information for that format.
+For additional information on this, see [CONFIG.md](docs/CONFIG.md).
 
 To process a roll, use the provided `roll2midi` utility, like so:
 
 ```{bash}
-roll2midi -l 5000 -c clavitist hupfeld_clavitist_roll.tif out.mid 
+roll2midi -c clavitist -t 60 hupfeld_animatic_roll.tif out.mid 
 ```
 
 This will:
 
-* `-l 5000` skip the first 5000 lines of the image provided, which can be useful in ignoring the head of the roll (if present) which may or may not introduce erroneously detected note information if not skipped
-* `-c clavitist` use the `clavitist` profile bundled with the application. You may also pass the path to a json file containing a custom configuration or even a raw json string here.
-* `hupfeld_clavitist_roll.tif` read the roll scan from this file
+* `-c animatic` use the `animatic` profile bundled with the application. You may also pass the path to a json file containing a custom configuration or even a raw json string here.
+* `-t 60` set the roll speed to 60. The unit is feet-per-minute times 10, which is the unit annotated on (most) rolls. This means the roll will effectively be processed as if it were played back 6 feet per minute.
+* `hupfeld_animatic_roll.tif` read the roll scan from this file
 * `out.mid` write the generated midi file here
 
 For more inforamtion on the command line interface for roll digitization pass the `-h` or `--help` parameter:

@@ -303,6 +303,16 @@ def roll2midi(argv=sys.argv):
         help="Optional number of lines to skip before starting to process the file.",
     )
     parser.add_argument(
+        "-t",
+        "--tempo",
+        dest="tempo",
+        default=50,
+        const=50,
+        nargs="?",
+        type=int,
+        help="Tempo of the roll. Unit is feet-per-minute (fpm) * 10, as is annotated on (most) rolls.",
+    )
+    parser.add_argument(
         "-b",
         "--background",
         dest="bg_color",
@@ -342,6 +352,7 @@ def roll2midi(argv=sys.argv):
         args.bg_color,
         args.chunk_size,
         args.skip_lines,
+        args.tempo,
     )
 
 
