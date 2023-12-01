@@ -560,7 +560,7 @@ def _calculate_hole_width_range(
         (tolerances[0], tolerances[1]) if tolerances[0] < tolerances[1] else tolerances
     )
 
-    width_mm = list(width_mm) if isinstance(width_mm, float) else width_mm
+    width_mm = list([width_mm]) if isinstance(width_mm, float) else width_mm
 
     bounds_min = min(
         [int(width / 25.4 * resolution * tolerances[0]) for width in width_mm]

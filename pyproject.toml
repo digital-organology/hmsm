@@ -34,7 +34,8 @@ dependencies = [
     "matplotlib",
     "scikit-learn",
     "mido",
-    "scipy"
+    "scipy",
+    "imagecodecs"
 ]
 
 [project.optional-dependencies]
