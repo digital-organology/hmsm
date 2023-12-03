@@ -261,7 +261,9 @@ def _postprocess_pedal_markers(markers: list) -> np.ndarray:
             # If the previous marker was a pedal start we check if the next marker is a start marker
             # if it is we most likely got this one wrong and it is an end marker
             # If it isnt we most likely missed the previous end marker and overwrite
-            if note_start is None or markers[i + 1, 4] < cutoffs[4]:
+            if i < len(markers) and (
+                note_start is None or markers[i + 1, 4] < cutoffs[4]
+            ):
                 note_start = markers[i, 0]
             else:
                 notes.append(
@@ -289,7 +291,7 @@ def _postprocess_pedal_markers(markers: list) -> np.ndarray:
                     )
                 )
                 note_start = None
-            elif markers[i + 1, 4] < cutoffs[4]:
+            elif i < len(markers) and (markers[i + 1, 4] < cutoffs[4]):
                 note_start = markers[i, 0]
 
     return np.vstack(notes)
@@ -446,7 +448,12 @@ def _process_annotations(
     for val in coords:
         val[:, 0] = val[:, 0] + offset
 
-    coords = [val for val in coords if len(val) >= MIN_NUM_PIXELS and len(val) <= 20000]
+    coords = [
+        val
+        for val in coords
+        if len(val) >= MIN_NUM_PIXELS
+        and len(val) <= (mask.shape[0] + mask.shape[1] * 10)
+    ]
 
     if pedal_cutoff is not None:
         pedal = list()

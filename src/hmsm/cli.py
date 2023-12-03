@@ -335,7 +335,7 @@ def roll2midi(argv=sys.argv):
     )
 
     if args.debug:
-        debug_path = f"debug_data_{input}"
+        debug_path = f"debug_data"
         pathlib.Path(debug_path).mkdir(exist_ok=True)
         pathlib.Path(f"{debug_path}/masks").mkdir(exist_ok=True)
     try:

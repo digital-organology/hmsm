@@ -441,7 +441,7 @@
             "upper_threshold": 0.75,
             "roll_detection_threshold": "auto"
         },
-        "pedal_cutoff": 0.085,
+        "pedal_cutoff": 0.095,
         "hole_width_mm": 2.7,
         "track_measurements": [
             {
