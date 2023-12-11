@@ -52,6 +52,7 @@ disc2midi = "hmsm.cli:disc2midi"
 roll2masks = "hmsm.cli:roll2masks"
 roll2midi = "hmsm.cli:roll2midi"
 midi2disc = "hmsm.cli:midi2disc"
+roll2config = "hmsm.cli:roll2config"
 
 [tools.setuptools.packages.find]
 exclude = ["assets*", "docs*"]

@@ -9,7 +9,7 @@ import json
 import logging
 import math
 import pathlib
-from typing import List, Optional, Self, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -114,11 +114,13 @@ def analyze_roll(
             logging.info(f"Processing chunk from {start} to {end}")
 
         mask = hmsm.rolls.masking.methods.v_channel(
-            image[start:end, :, :], bg_color, threshold
+            None, image[start:end, :, :], bg_color, threshold
         )
         mask = mask["holes"]
 
-        left_edge, right_edge = hmsm.rolls._get_roll_edges(np.invert(mask))
+        left_edge, right_edge = hmsm.rolls.masking.methods._get_roll_edges(
+            image[start:end, :, :], "auto"
+        )
 
         labels = skimage.measure.label(mask, background=False, connectivity=2)
         components = list(hmsm.utils.to_coord_lists(labels).values())
@@ -128,7 +130,7 @@ def analyze_roll(
                 functools.partial(
                     hmsm.rolls._filter_component,
                     width_bounds=width_bounds,
-                    height_bounds=(width_bounds[0], 1000),
+                    height_bounds=(width_bounds[0], chunk_size / 2),
                 ),
                 components,
             )
@@ -240,10 +242,12 @@ def analyze_roll(
 
         chunk = image[start:end, :, :]
 
-        mask = hmsm.rolls.masking.methods.v_channel(chunk, bg_color, threshold)
+        mask = hmsm.rolls.masking.methods.v_channel(None, chunk, bg_color, threshold)
         mask = mask["holes"]
 
-        left_edge, right_edge = hmsm.rolls._get_roll_edges(np.invert(mask))
+        left_edge, right_edge = hmsm.rolls.masking.methods._get_roll_edges(
+            image[start:end, :, :], "auto"
+        )
 
         labels = skimage.measure.label(mask, background=False, connectivity=2)
         components = list(hmsm.utils.to_coord_lists(labels).values())
@@ -253,7 +257,7 @@ def analyze_roll(
                 functools.partial(
                     hmsm.rolls._filter_component,
                     width_bounds=width_bounds,
-                    height_bounds=(width_bounds[0], 1000),
+                    height_bounds=(width_bounds[0], chunk_size / 2),
                 ),
                 components,
             )
