@@ -383,7 +383,7 @@ def roll2config(argv=sys.argv):
         default=0,
         const=0,
         nargs="?",
-        type=float,
+        type=int,
         help="Number of lines to skip from the beginning of the roll",
     )
     parser.add_argument(

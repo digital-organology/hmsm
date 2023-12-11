@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import os
-import traceback
 from typing import List, Optional, Tuple
 
 import cv2
@@ -16,6 +15,7 @@ import scipy.sparse.csgraph
 import scipy.spatial.distance
 import skimage.io
 import skimage.morphology
+import skimage.util
 
 try:
     import enlighten
@@ -56,7 +56,9 @@ def process_roll(
 
     image = skimage.io.imread(input_path)
 
-    # TODO: Check if skip lines < height of image
+    if image.shape[2] == 4:
+        logging.info("Image appears to have an alpha channel which will be dropped")
+        image = image[:, :, 0:3]
 
     if skip_lines > 0:
         image = image[skip_lines:, :]
@@ -186,10 +188,16 @@ def process_roll(
     if dyn_line:
         logging.info("Processing dynamics annotations")
         dyn_line = _postprocess_dynamics_line(dyn_line)
+    else:
+        dyn_line = None
 
     if pedal_markers:
         pedal_markers = _postprocess_pedal_markers(pedal_markers)
-        note_data = np.vstack([note_data, pedal_markers])
+        note_data = (
+            np.vstack([note_data, pedal_markers])
+            if pedal_markers is not None
+            else note_data
+        )
 
     note_data = merge_notes(note_data, hole_width)
 
@@ -233,6 +241,8 @@ def _postprocess_pedal_markers(markers: list) -> np.ndarray:
         np.ndarray: Processed pedal control information
     """
     markers = list(itertools.chain(*markers))
+    if len(markers) == 0:
+        return None
     markers = np.vstack(markers)
 
     markers = markers[markers[:, 1] > 3000]
@@ -251,6 +261,12 @@ def _postprocess_pedal_markers(markers: list) -> np.ndarray:
     markers = np.c_[markers, markers[:, 2] - markers[:, 3]]
     markers[:, 4] = markers[:, 2] - markers[:, 3]
 
+    if len(markers) < 10:
+        logging.info(
+            f"Found only {len(markers)} data points for pedal markers, this likely indicates there are no pedal annotations and the detected data points are noise, skipping."
+        )
+        return None
+
     cutoffs = np.mean(markers, axis=0)
 
     notes = list()
@@ -261,11 +277,11 @@ def _postprocess_pedal_markers(markers: list) -> np.ndarray:
             # If the previous marker was a pedal start we check if the next marker is a start marker
             # if it is we most likely got this one wrong and it is an end marker
             # If it isnt we most likely missed the previous end marker and overwrite
-            if i < len(markers) and (
+            if (i + 1) < len(markers) and (
                 note_start is None or markers[i + 1, 4] < cutoffs[4]
             ):
                 note_start = markers[i, 0]
-            else:
+            elif note_start is not None:
                 notes.append(
                     np.array(
                         [
@@ -276,6 +292,10 @@ def _postprocess_pedal_markers(markers: list) -> np.ndarray:
                     )
                 )
                 note_start = None
+            else:
+                # We only get here if we're at the last entry and it's a start marker but we're missing the corresponding end mark
+                # so we just skip it
+                continue
         else:
             # Basically the same thing as before: If the previous marker was an end marker we check the next marker.
             # If it also is an end marker we assume we got this one wrong and set it as a start marker.
@@ -291,14 +311,16 @@ def _postprocess_pedal_markers(markers: list) -> np.ndarray:
                     )
                 )
                 note_start = None
-            elif i < len(markers) and (markers[i + 1, 4] < cutoffs[4]):
+            elif (i + 1) < len(markers) and (markers[i + 1, 4] < cutoffs[4]):
                 note_start = markers[i, 0]
 
     return np.vstack(notes)
 
 
 def _find_roll_start(
-    left_edge: np.ndarray, right_edge: np.ndarray, image_width: int
+    left_edge: np.ndarray,
+    right_edge: np.ndarray,
+    image_width: int,
 ) -> int | None:
     """Find the beginning of the roll
 
@@ -345,7 +367,15 @@ def _postprocess_dynamics_line(line: list) -> np.ndarray:
         np.ndarray: Interpolated dynamics values for the entire area covered by the provided data
     """
     line = list(itertools.chain(*line))
+    if len(line) == 0:
+        return None
     line = np.vstack(line).astype(np.uint32)
+
+    if len(line) < 200:
+        logging.info(
+            f"Found only {len(line)} data points for the dynamics line, this most likely indicates the roll doesnt have any printed dynamics annotations and the data found is noise. Skipping."
+        )
+        return None
 
     dists = scipy.spatial.distance.cdist(line, line)
     dists[dists == 0] = float("inf")
@@ -361,12 +391,6 @@ def _postprocess_dynamics_line(line: list) -> np.ndarray:
     line = line[keep, :]
 
     line = line[line[:, 0].argsort(), :]
-
-    # line_interpolated = np.arange(line[:, 0].min(), line[:, 0].max())
-
-    # line_interpolated = np.column_stack(
-    #     (line_interpolated, np.zeros_like(line_interpolated))
-    # )
 
     # Prepare points on line data
 
@@ -433,15 +457,23 @@ def _process_annotations(
         mask (np.ndarray): Binary mask of the printed annotations
         offset (int): Offset of the chunk that mask represents, will be used to adjust position information
         edges (Optional[tuple], optional): Tuple containing positions of the roll edges. Only required if pedal markers are present on the roll. Defaults to None.
-        pedal_cutoff (Optional[float], optional): Relative cutoff point (from the left side of the roll) at which the pedal annotations stop and the dynamics line begins. Defaults to None.
+        pedal_cutoff (Optional[float], optional): Relative cutoff point (from the left side of the roll) at which the pedal annotations stop and the dynamics line begins. For cutoff <= 0.5 it is assumed the pedal marks are on the left side of the roll, for values > 0.5 on the right side. Defaults to None.
 
     Returns:
         List | Tuple[List, List]: The extracted annotation data
     """
     MIN_NUM_PIXELS = 200 if pedal_cutoff is None else 250
 
+    # Correct processing of the pedal is more sensitive to holes in the mask, so we run an additional dilation
+
     if pedal_cutoff is not None:
         mask = skimage.morphology.binary_dilation(mask, skimage.morphology.diamond(5))
+
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        skimage.io.imsave(
+            f"annotations_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.jpg",
+            skimage.util.img_as_ubyte(mask),
+        )
 
     coords = hmsm.utils.to_coord_lists(mask)
     coords = list(coords.values())
@@ -455,14 +487,24 @@ def _process_annotations(
         and len(val) <= (mask.shape[0] + mask.shape[1] * 10)
     ]
 
+    # If there are pedal annotations on the roll we check each data point for its location relative to the pedal cutoff limit
+
     if pedal_cutoff is not None:
         pedal = list()
         dyn_line = list()
         for val in coords:
             y, x = tuple(np.mean(val, axis=0).astype(int))
-            if ((edges[1][y - offset] - edges[0][y - offset]) * pedal_cutoff) + edges[
-                0
-            ][y - offset] > x:
+            if (
+                pedal_cutoff <= 0.5
+                and ((edges[1][y - offset] - edges[0][y - offset]) * pedal_cutoff)
+                + edges[0][y - offset]
+                > x
+            ) or (
+                pedal_cutoff > 0.5
+                and ((edges[1][y - offset] - edges[0][y - offset]) * pedal_cutoff)
+                + edges[0][y - offset]
+                < x
+            ):
                 pedal.append(
                     np.array(
                         (
@@ -485,7 +527,7 @@ def _process_annotations(
 
 def merge_notes(
     notes: np.ndarray,
-    hole_size_mm: Optional[float],
+    hole_size_mm: Optional[float] = None,
 ) -> np.ndarray:
     """Merge notes that sound as one
 
@@ -494,10 +536,12 @@ def merge_notes(
 
     Args:
         notes (np.ndarray): Array containing detected notes
+        hole_size_mm (Optional[float]): Size of the holes on the roll, will be used to calculate the merging threshold. If missing this will be guessed from the data. Defaults to None.
 
     Returns:
         np.ndarray: Input array with close notes merged
     """
+    # Holes with a gap < hole_size * CORRECTION FACTOR are assumed to sound as a single note
     CORRECTION_FACTOR = 1.75
 
     offset = notes[:, 0].min()
@@ -529,19 +573,6 @@ def merge_notes(
                 current_row = tone_notes[i, :]
 
         notes_merged.append(current_row)
-
-    # rows.append(current_row)
-
-    #     note_start_idx = (
-    #         np.diff(tone_notes[:, 0], prepend=(merge_threshold * -1 - 1))
-    #         > merge_threshold
-    #     )
-    #     note_end_idx = np.roll(note_start_idx, -1)
-
-    #     tone_notes_merged = tone_notes[note_start_idx, :]
-    #     tone_notes_merged[:, 1] = tone_notes[note_end_idx, 1]
-
-    #     notes_merged.append(tone_notes_merged)
 
     notes_merged = np.vstack(notes_merged)
 
@@ -634,19 +665,6 @@ def extract_note_data(
 
         # Find the closest track (based on the left track edge for now, might want to include the right edge in the future)
         track_idx = np.abs(alignment_grid[:, 0] - left_dist).argmin()
-
-        # Currently not beeing used
-
-        # # Calculate the misalignment of the note center from the track center
-        # relative_x_position = (x_position - left_edge[y_position]) / roll_width
-        # misalignment = relative_x_position - alignment_grid[track_idx, 0:2].mean()
-
-        # # If the misalignment is negative the note is to the left of the track
-        # # and we need to shift the track to the left and vice versa for a positive misalignment
-        # # We apply a correction to the alignment grid which we base on the difference in misalignments
-        # # however we only correct for a fraction of the actual misalignment to prevent overcorrecting
-        # correction = misalignment * 0.2
-        # alignment_grid[:, 0:2] = alignment_grid[:, 0:2] + correction
 
         # Calculate note data
         note_data.append(

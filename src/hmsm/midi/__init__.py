@@ -257,7 +257,7 @@ class MidiGenerator:
         self._midi_file = midi_file
 
 
-# Maintained for backwards compatability until we port the disc processing to the new generator object
+# Maintained for backwards compatability until we port the disc processing to the new generator class
 
 
 def create_midi(

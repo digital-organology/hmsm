@@ -44,7 +44,10 @@ def read_image(
     return binarize_image(img, threshold) if binarize else img
 
 
-def binarize_image(image: np.ndarray, threshold: Optional[int] = None) -> np.ndarray:
+def binarize_image(
+    image: np.ndarray,
+    threshold: Optional[int] = None,
+) -> np.ndarray:
     """Binarize image
 
     This will convert the input image to grayscale if necessary and then perform binarization, either with the provided threshold value or with an estimated one.

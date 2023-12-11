@@ -7,7 +7,10 @@ import re
 import pkg_resources
 
 
-def get_config(config: str, method: str) -> dict:
+def get_config(
+    config: str,
+    method: str,
+) -> dict:
     """Find and load configuration data
 
     This function will do one of the following three things, depending on the provided config argument:
@@ -133,7 +136,11 @@ def _validate_roll_config(config: dict) -> bool:
     Returns:
         bool: True if the configuration is valid, False otherwise
     """
-    required_keys = {"track_measurements", "roll_width_mm"}
+    required_keys = {
+        "track_measurements",
+        "roll_width_mm",
+        "binarization_method",
+    }
     if not required_keys <= config.keys():
         logging.error(
             f"Configuration misses the following required values: {required_keys - config.keys()}"

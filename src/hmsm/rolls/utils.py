@@ -3,27 +3,20 @@
 import os
 
 os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
-import itertools
 import logging
-import random
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-import cv2
 import numpy as np
-import scipy.spatial.distance
 import skimage
 import skimage.color
 import skimage.filters
 import skimage.io
 import skimage.measure
 
-import hmsm.rolls
-import hmsm.utils
-from hmsm.rolls.masking import MaskGenerator
-
 
 def get_initial_alignment_grid(
-    roll_width_mm: int, track_measurements: List
+    roll_width_mm: int,
+    track_measurements: List,
 ) -> np.ndarray:
     """Gets the initial alignment grid from the provided track measurements and converts it into relative positions
 
@@ -39,7 +32,10 @@ def get_initial_alignment_grid(
     return alignment_grid
 
 
-def guess_background_color(image: np.ndarray, n_points: Optional[int] = 1000) -> str:
+def guess_background_color(
+    image: np.ndarray,
+    n_points: Optional[int] = 1000,
+) -> str:
     """Detect the background color of the provided image
 
     Args:

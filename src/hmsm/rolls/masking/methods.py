@@ -3,7 +3,6 @@
 import random
 from typing import Dict, Optional, Tuple
 
-import cv2
 import numpy as np
 import scipy.signal
 import skimage.color
@@ -57,7 +56,7 @@ def v_channel(
         return {"holes": image, "edges": (left_edge, right_edge)}
 
     holes_dilated = skimage.morphology.binary_dilation(image, footprint)
-    annotations = (np.invert(holes_dilated)) & (v_channel < 0.75)
+    annotations = (np.invert(holes_dilated)) & (v_channel < upper_threshold)
     annotations = skimage.morphology.binary_opening(annotations, footprint)
 
     if roll_detection_threshold is not None:
@@ -73,7 +72,8 @@ def v_channel(
 
 
 def _get_roll_edges(
-    mask: np.ndarray, threshold: Optional[str | float] = None
+    mask: np.ndarray,
+    threshold: Optional[str | float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Detect roll edges on the given mask
 
