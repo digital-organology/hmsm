@@ -70,7 +70,8 @@ If set to `auto` otsus method will be used to compute the theshold.
 "pedal_cutoff": 0.085,
 ```
 
-Setting `pedal_cutoff` will tell the processing software that the printed annotations contain pedal markers (assumed to be on the left side of the roll), the value indicates the (relative) area on the left side of the roll where they are printed.
+Setting `pedal_cutoff` will tell the processing software that the printed annotations contain pedal markers, the value indicates the (relative) area on the left side of the roll where they are printed.
+For values `<=0.5` the markers are assumed to be on the left of the cutoff point, for values `>0.5` they will be assumed to be on the right respectively.
 
 ```
 "hole_width_mm": 2.7,
