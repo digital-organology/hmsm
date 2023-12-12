@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hmsm"
-version = "0.4.0"
+version = "0.9.0"
 authors = [
-    {name = "David Fuhry", email = "david.fuhry@uni-leipzig.de"}
+    {name = "David Fuhry", email = "david@davidfuhry.com"}
 ]
 description = "Tools for image based digitization of historical music storage media"
 license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"
 readme = {file = "README.md", content-type="text/markdown"}
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
