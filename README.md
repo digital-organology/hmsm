@@ -5,21 +5,27 @@ This python package is the software implementation for the digitization part of 
 
 ## Installation
 
+To install from PyPI use:
+
+```
+pip install hmsm
+```
+
 To install the development version directly from Github you can use pip like so:
 
 ```{bash}
 pip install git+https://github.com/digital-organology/hmsm.git
 ```
 
-For additional installation information see [INSTALL.md](docs/INSTALL.md).
+For additional installation information see [INSTALL.md](https://github.com/digital-organology/hmsm/blob/main/docs/INSTALL.md).
 
 ## Usage
 
 ### Piano Roll Digitization
 
-We support digitization for a number of formats of piano rolls out of the box, for an overview see [FORMATS.md](docs/FORMATS.md).
+We support digitization for a number of formats of piano rolls out of the box, for an overview see [FORMATS.md](https://github.com/digital-organology/hmsm/blob/main/docs/FORMATS.md).
 If you miss support for a format of interest for you, we provide tooling to help you create configuration information for that format.
-For additional information on this, see [CONFIG.md](docs/CONFIG.md).
+For additional information on this, see [CONFIG.md](https://github.com/digital-organology/hmsm/blob/main/docs/CONFIG.md).
 
 The program generally expects roll scans to be taken against a black or white background.
 If not specified using the `--background` parameter the color will be extrapolated from the provided image.
@@ -48,13 +54,9 @@ roll2midi --help
 
 We currently support Image-to-Midi transformation for Ariston brand cardboard discs with 24 tracks. We expect our process to work for all types of discs that encode information in the same general way.
 
-During development we use photographs of discs like the following:
 
-![Ariston Brand Disc](assets/5070081_22.JPG)
-
-These images are overexposed and have the start position of the disc aligned to 0 Degrees.
+We use images that are overexposed and have the start position of the disc aligned to 0 degrees like [this one](https://github.com/digital-organology/hmsm/blob/main/assets/5070081_22.JPG).
 You may need to preproces your image using you favorite image processing software.
-Currently this may require addition preprocessing.
 Be sure to pass the rotation of the start position of the disc using the `--offset` parameter.
 
 To digitize the example image included in this repository call the included command line utility, like so:
