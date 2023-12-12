@@ -1,13 +1,11 @@
 # HMSM-Tools
 
-This repository contains tool for the digitization and analysis of **H**istorical **M**usical **S**torage **M**edia.
+This python package contains tool for the digitization and analysis of **H**istorical **M**usical **S**torage **M**edia.
 This python package is the software implementation for the digitization part of the [BMBF](https://www.bmbf.de/bmbf/de/home/home_node.html) funded research project [DISKOS](https://organology.uni-leipzig.de/index.php/forschung/diskos) at the [Research Center Digital Organology](https://organology.uni-leipzig.de/) at Leipzig University.
-
-Development is currently underway with support for additional formats/components beeing added.
 
 ## Installation
 
-In the future we will publish this package to PyPI, in the meantime the development version can by installed directly from Github:
+To install the development version directly from Github you can use pip like so:
 
 ```{bash}
 pip install git+https://github.com/digital-organology/hmsm.git
@@ -23,6 +21,10 @@ We support digitization for a number of formats of piano rolls out of the box, f
 If you miss support for a format of interest for you, we provide tooling to help you create configuration information for that format.
 For additional information on this, see [CONFIG.md](docs/CONFIG.md).
 
+The program generally expects roll scans to be taken against a black or white background.
+If not specified using the `--background` parameter the color will be extrapolated from the provided image.
+The roll scan is also expected to be somewhat straight, with a slight curvature beeing compensated for automatically.
+
 To process a roll, use the provided `roll2midi` utility, like so:
 
 ```{bash}
@@ -32,7 +34,7 @@ roll2midi -c animatic -t 60 hupfeld_animatic_roll.tif out.mid
 This will:
 
 * `-c animatic` use the `animatic` profile bundled with the application. You may also pass the path to a json file containing a custom configuration or even a raw json string here.
-* `-t 60` set the roll speed to 60. The unit is feet-per-minute times 10, which is the unit annotated on (most) rolls. This means the roll will effectively be processed as if it were played back 6 feet per minute.
+* `-t 60` set the roll speed to 60. The unit is feet-per-minute times 10, which is the unit annotated on (most) rolls. This means the roll will effectively be processed as if it were played back at 6 feet per minute.
 * `hupfeld_animatic_roll.tif` read the roll scan from this file
 * `out.mid` write the generated midi file here
 
@@ -44,14 +46,14 @@ roll2midi --help
 
 ### Cardboard Disc Digitization
 
-We currently support Image-to-Midi transformation for Ariston brand cardboard discs with 24 tracks. We expect our process to work for all types of discs that enode information in the same general way.
+We currently support Image-to-Midi transformation for Ariston brand cardboard discs with 24 tracks. We expect our process to work for all types of discs that encode information in the same general way.
 
 During development we use photographs of discs like the following:
 
 ![Ariston Brand Disc](assets/5070081_22.JPG)
 
 These images are overexposed and have the start position of the disc aligned to 0 Degrees.
-While we only did minimal testing up until now, we expect our approach to also work for normal pictures, as long as there is sufficient contrast between the disc and the image background.
+You may need to preproces your image using you favorite image processing software.
 Currently this may require addition preprocessing.
 Be sure to pass the rotation of the start position of the disc using the `--offset` parameter.
 
@@ -82,14 +84,6 @@ To transform the included color photography of the same disc as used above run:
 
 ```{bash}
 disc2roll --offset 92 assets/5070081_11.JPG roll.JPG
-```
-
-### Cardboard Disc Generation
-
-Included is an additional utitily that will create the image of a cardboard disc from a provided midi file. All notes that are in the midi file and not supported by the disc format will be ignored.
-
-```
-midi2disc -n "My Awesome Disc" midi_input.mid disc_output.jpg
 ```
 
 ## License
