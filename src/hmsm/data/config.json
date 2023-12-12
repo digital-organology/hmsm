@@ -4119,7 +4119,8 @@
         "roll_width_mm": 286.0,
         "binarization_method": "v_channel",
         "binarization_options": {
-            "threshold": 0.15
+            "threshold": 0.15,
+            "roll_detection_threshold": "auto"
         },
         "hole_width_mm": 2.7,
         "track_measurements": [
