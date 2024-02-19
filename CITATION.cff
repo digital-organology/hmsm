@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+title: HMSM-Tools
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+authors:
+- given-names: David
+  family-names: Fuhry
+- given-names: Dominik
+  family-names: Ukolov
+  orcid: "https://orcid.org/0000-0002-7904-3892"
+- given-names: Franziska
+  family-names: Bühl
+- given-names: Heike
+  family-names: Fricke
+url: 'https://github.com/digital-organology/hmsm'
+license: GPL-3.0-or-later
+date-released: 2023-05-25
