@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "hmsm"
 version = "0.9.1"
 authors = [
-    {name = "David Fuhry", email = "david@davidfuhry.com"}
+    {name = "David Fuhry", email = "d.fuhry@tu-berlin.de"}
 ]
 description = "Tools for image based digitization of historical music storage media"
 license = {text = "GPL-3.0-or-later"}
