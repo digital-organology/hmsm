@@ -42,8 +42,8 @@ def v_channel(
         v_channel < threshold if bg_color == "black" else (1 - v_channel) < threshold
     )
     footprint = skimage.morphology.diamond(3)
-    image = skimage.morphology.binary_opening(image, footprint)
-    image = skimage.morphology.binary_closing(image, footprint)
+    image = skimage.morphology.opening(image, footprint)
+    image = skimage.morphology.closing(image, footprint)
 
     if roll_detection_threshold is not None:
         for i in range(0, len(image)):
@@ -55,9 +55,9 @@ def v_channel(
     if upper_threshold is None:
         return {"holes": image, "edges": (left_edge, right_edge)}
 
-    holes_dilated = skimage.morphology.binary_dilation(image, footprint)
+    holes_dilated = skimage.morphology.dilation(image, footprint)
     annotations = (np.invert(holes_dilated)) & (v_channel < upper_threshold)
-    annotations = skimage.morphology.binary_opening(annotations, footprint)
+    annotations = skimage.morphology.opening(annotations, footprint)
 
     if roll_detection_threshold is not None:
         for i in range(0, len(annotations)):
@@ -96,7 +96,7 @@ def _get_roll_edges(
         mask = np.invert(mask)
 
     if threshold is not None:
-        mask = skimage.morphology.binary_closing(mask, skimage.morphology.diamond(5))
+        mask = skimage.morphology.closing(mask, skimage.morphology.diamond(5))
 
     rows, cols = np.where(mask)
 

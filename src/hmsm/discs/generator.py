@@ -10,6 +10,30 @@ import numpy as np
 
 try:
     import vnoise
+except ModuleNotFoundError as e:
+    # vnoise 0.1.0 (its only release) reads its own version via the now-removed
+    # pkg_resources API at import time. Rather than require every user to keep an
+    # old setuptools around just to satisfy that, shim in the minimal piece of
+    # pkg_resources it actually calls and retry once.
+    if e.name == "pkg_resources":
+        import sys
+        import types
+        import importlib.metadata
+
+        stub = types.ModuleType("pkg_resources")
+        stub.get_distribution = lambda name: types.SimpleNamespace(
+            version=importlib.metadata.version(name)
+        )
+        sys.modules["pkg_resources"] = stub
+
+        try:
+            import vnoise
+        except ImportError:
+            _has_vnoise = False
+        else:
+            _has_vnoise = True
+    else:
+        _has_vnoise = False
 except ImportError:
     _has_vnoise = False
 else:

@@ -35,7 +35,8 @@ dependencies = [
     "scikit-learn",
     "mido",
     "scipy",
-    "imagecodecs"
+    "imagecodecs",
+    "pandas"
 ]
 
 [project.optional-dependencies]

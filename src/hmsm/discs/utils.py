@@ -110,6 +110,108 @@ def transform_to_rectangle(
     return interpolated_image
 
 
+def _fit_ellipse(data: np.ndarray) -> Tuple[float, float, float, float, float]:
+    """Fit an ellipse to a set of 2D points using a direct least-squares conic fit
+
+    Reimplements the algorithm behind skimage.measure.EllipseModel (Halir & Flusser,
+    "Numerically stable direct least squares fitting of ellipses"). skimage takes the
+    real part of its result only at the very end, after dividing the (potentially
+    complex-typed) angle by pi; whether np.linalg.eig returns a real or a complex
+    dtype for this data depends on floating point noise from the BLAS backend, and
+    numpy has never supported the modulo operator on complex arrays, so skimage's own
+    implementation can raise a TypeError. We take the real part right after the
+    eigendecomposition instead, which is equivalent whenever skimage would otherwise
+    succeed.
+
+    Args:
+        data (np.ndarray): Nx2 array of (row, column) coordinates to fit
+
+    Raises:
+        ValueError: Will be raised if an ellipse could not be fit to the given points
+
+    Returns:
+        Tuple[float, float, float, float, float]: x0, y0, width, height, phi (semi-axes and rotation in radians)
+    """
+    if len(data) < 5:
+        raise ValueError("Need at least 5 data points to estimate an ellipse")
+
+    data = data.astype(np.float64, copy=False)
+    origin = data.mean(axis=0)
+    data = data - origin
+    scale = data.std()
+
+    if scale < np.finfo(np.float64).tiny:
+        raise ValueError(
+            "Standard deviation of data is too small to estimate ellipse with meaningful precision"
+        )
+
+    data = data / scale
+
+    x = data[:, 0]
+    y = data[:, 1]
+
+    # Quadratic and linear parts of the design matrix
+    D1 = np.vstack([x**2, x * y, y**2]).T
+    D2 = np.vstack([x, y, np.ones_like(x)]).T
+
+    # Scatter matrix
+    S1 = D1.T @ D1
+    S2 = D1.T @ D2
+    S3 = D2.T @ D2
+
+    # Constraint matrix
+    C1 = np.array([[0.0, 0.0, 2.0], [0.0, -1.0, 0.0], [2.0, 0.0, 0.0]])
+
+    try:
+        M = np.linalg.inv(C1) @ (S1 - S2 @ np.linalg.inv(S3) @ S2.T)
+    except np.linalg.LinAlgError:
+        raise ValueError("Singular matrix while estimating ellipse")
+
+    eig_vals, eig_vecs = np.linalg.eig(M)
+    eig_vecs = eig_vecs.real
+
+    # Eigenvector must satisfy 4ac - b^2 > 0 to describe a valid ellipse
+    cond = 4 * eig_vecs[0, :] * eig_vecs[2, :] - eig_vecs[1, :] ** 2
+    a1 = eig_vecs[:, cond > 0]
+
+    if a1.shape[1] != 1:
+        raise ValueError("Eigenvector constraints not met while estimating ellipse")
+
+    a, b, c = a1.ravel()
+    a2 = -np.linalg.inv(S3) @ S2.T @ a1
+    d, f, g = a2.ravel()
+
+    b /= 2.0
+    d /= 2.0
+    f /= 2.0
+
+    x0 = (c * d - b * f) / (b**2.0 - a * c)
+    y0 = (a * f - b * d) / (b**2.0 - a * c)
+
+    numerator = a * f**2 + c * d**2 + g * b**2 - 2 * b * d * f - a * c * g
+    term = np.sqrt((a - c) ** 2 + 4 * b**2)
+    denominator1 = (b**2 - a * c) * (term - (a + c))
+    denominator2 = (b**2 - a * c) * (-term - (a + c))
+    width = np.sqrt(2 * numerator / denominator1)
+    height = np.sqrt(2 * numerator / denominator2)
+
+    phi = 0.5 * np.arctan((2.0 * b) / (a - c))
+    if a > c:
+        phi += 0.5 * np.pi
+
+    if width < height:
+        width, height = height, width
+        phi += np.pi / 2
+
+    phi %= np.pi
+
+    params = np.nan_to_num([x0, y0, width, height, phi])
+    params[:4] *= scale
+    params[:2] += origin
+
+    return tuple(params)
+
+
 def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int, float]:
     """Fit ellipse equation to circumference of disc
 
@@ -119,7 +221,7 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
         image (np.ndarray): Image of a disc shaped medium, binarization and edge detection will be run automatically
 
     Returns:
-        Tuple[int, int, int, int, float]: xc, yx, a, b, theta as calculated by skimage.measure.EllipseModel
+        Tuple[int, int, int, int, float]: xc, yx, a, b, theta as calculated by the direct least-squares ellipse fit
     """
     if image.ndim == 3 or np.unique(image).size > 2:
         image = hmsm.utils.binarize_image(image)
@@ -136,9 +238,7 @@ def fit_ellipse_to_circumference(image: np.ndarray) -> Tuple[int, int, int, int,
 
     # Fit an ellipse to the outer edge to determine the image center
 
-    ell = skimage.measure.EllipseModel()
-    ell.estimate(edge)
-    center_x, center_y, a, b, theta = ell.params
+    center_x, center_y, a, b, theta = _fit_ellipse(edge)
     center_x = int(center_x)
     center_y = int(center_y)
     a = int(a)

@@ -1,10 +1,9 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
+import importlib.resources
 import json
 import logging
 import re
-
-import pkg_resources
 
 
 def get_config(
@@ -32,7 +31,7 @@ def get_config(
         dict: Read and validated configuration data
     """
 
-    if re.search("\.json$", config):
+    if re.search(r"\.json$", config):
         logging.info(
             "Provided config looks like a filename, trying to read configuration from that file"
         )
@@ -43,7 +42,7 @@ def get_config(
             logging.error(f"Failed to open file '{config}'")
             raise
         logging.info(f"Read configuration from file {config}")
-    elif re.search("^\{.*\}$", config.strip()):
+    elif re.search(r"^\{.*\}$", config.strip()):
         logging.info(
             "Provided config looks like a json string, trying to read configuration from the string"
         )
@@ -56,8 +55,10 @@ def get_config(
     else:
         logging.info("Trying to find configuration profile in internal config file")
         try:
-            file = pkg_resources.resource_filename(__name__, "data/config.json")
-            with open(file, "r", encoding="UTF-8") as f:
+            resource = importlib.resources.files(__package__).joinpath(
+                "data/config.json"
+            )
+            with resource.open("r", encoding="UTF-8") as f:
                 config_data = json.load(f)
 
             config_data = config_data[config]

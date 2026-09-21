@@ -467,7 +467,7 @@ def _process_annotations(
     # Correct processing of the pedal is more sensitive to holes in the mask, so we run an additional dilation
 
     if pedal_cutoff is not None:
-        mask = skimage.morphology.binary_dilation(mask, skimage.morphology.diamond(5))
+        mask = skimage.morphology.dilation(mask, skimage.morphology.diamond(5))
 
     if logging.getLogger().isEnabledFor(logging.DEBUG):
         skimage.io.imsave(

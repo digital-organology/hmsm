@@ -128,9 +128,11 @@ class MidiGenerator:
                             + VELOCITY_BASE_MIN
                         )
                     else:
+                        matching_dynamics = dynamics_line[
+                            dynamics_line[:, 0] == row[0], 1
+                        ]
                         velocity = int(
-                            (dynamics_line[dynamics_line[:, 0] == row[0], 1] - min_vel)
-                            * velocity_factor
+                            (matching_dynamics[0] - min_vel) * velocity_factor
                             + VELOCITY_BASE_MIN
                         )
                 else:

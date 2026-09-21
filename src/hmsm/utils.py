@@ -3,12 +3,12 @@
 import os
 
 os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
+import importlib.resources
 import logging
 from typing import Optional, Tuple
 
 import cv2
 import numpy as np
-import pkg_resources
 import scipy
 import skimage
 import skimage.color
@@ -183,9 +183,9 @@ def get_lut() -> np.ndarray:
     Returns:
         np.ndarray: LUT
     """
-    file = pkg_resources.resource_filename(__name__, "data/lut.npy")
+    resource = importlib.resources.files(__package__).joinpath("data/lut.npy")
 
-    with open(file, "rb") as f:
+    with resource.open("rb") as f:
         lut = np.load(f)
 
     return lut
