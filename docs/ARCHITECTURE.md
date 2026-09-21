@@ -211,3 +211,13 @@ the scan's own metadata where it declares one, falling back to 300 dpi.
   set pixel and is where its memory use comes from.
 - **`hmsm.midi.create_midi`** is the legacy rendering path, still used by the
   disc pipeline. New MIDI features belong in `MidiGenerator`.
+
+### Browser preview
+
+The optional `hmsm.web` package wraps `RollDigitizer` in a single background
+worker. Its `on_update` callback publishes merged absolute-row note snapshots
+inside the primary loop, with a conservative playback watermark. It persists
+reduced JPEG tiles from existing band pixels rather than reading the scan again.
+The final `Transcription.origin_row` maps rebased notes back onto the scan.
+The Vite client shares scan-row coordinates between its transport, audio and
+canvas. See [WEB.md](WEB.md) for the API contract and lifecycle.

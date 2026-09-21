@@ -149,3 +149,35 @@ def test_debug_artefacts_are_written_when_asked(synthetic_roll, profile, tmp_pat
     )
     assert (debug / "notes_raw.csv").exists()
     assert (debug / "notes_merged.csv").exists()
+
+
+def test_live_snapshots_match_final_notes_before_the_watermark(synthetic_roll, profile):
+    updates = []
+    result = RollDigitizer(profile, band_height=73).run(
+        ArraySource(synthetic_roll), on_update=updates.append
+    )
+    final = result.notes.copy()
+    final[:, :2] += result.origin_row
+    assert len(updates) > 2
+    assert updates[-1].stop == len(synthetic_roll)
+    assert updates[2].safe_row > 0
+    for update in updates:
+        assert len(update.pixels) == update.stop - update.start
+        assert update.safe_row <= update.stop
+        for row in range(0, update.safe_row):
+            expected = final[(final[:, 0] <= row) & (final[:, 1] > row), 2]
+            actual = update.notes[
+                (update.notes[:, 0] <= row) & (update.notes[:, 1] > row), 2
+            ]
+            np.testing.assert_array_equal(np.sort(actual), np.sort(expected))
+    np.testing.assert_array_equal(updates[-1].notes, final)
+
+
+def test_live_consumer_can_cancel(synthetic_roll, profile):
+    def cancel(update):
+        raise RuntimeError("cancel preview")
+
+    with pytest.raises(RuntimeError, match="cancel preview"):
+        RollDigitizer(profile, band_height=73).run(
+            ArraySource(synthetic_roll), on_update=cancel
+        )

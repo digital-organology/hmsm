@@ -129,3 +129,12 @@ Tests that need a real scan skip themselves when the scan is not present, so the
 We provide this software under the GNU-GPL (Version 3-or-later, at your discretion).
 
 The photographs included in this repository (located unter `assets/`) are taken from our research platform [MusiXplora](https://www.musixplora.de/) and are generally provided under a CC BY-SA 4.0 License unless otherwise specified.
+
+### Browser roll player
+
+A local browser interface can digitize roll scans in the background while
+playing the recovered music over a moving scan, with highlighted notes, speed
+control and MIDI export. Install `pip install -e ".[web]"`, start `hmsm-web`,
+then run `pnpm install` and `pnpm dev` in `web/`.
+See [the browser player guide](docs/WEB.md) for setup, large-scan handling and
+live-preview limitations.

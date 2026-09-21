@@ -43,6 +43,7 @@ dependencies = [
 midi2disc = ["cairosvg", "vnoise"]
 progressbar = ["enlighten"]
 dev = ["pytest"]
+web = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [project.urls]
 homepage = "https://organology.uni-leipzig.de/"
@@ -50,6 +51,7 @@ repository = "https://github.com/digital-organology/hmsm"
 
 [project.scripts]
 hmsm = "hmsm.cli:main"
+hmsm-web = "hmsm.web:main"
 disc2roll = "hmsm.cli:disc2roll"
 disc2midi = "hmsm.cli:disc2midi"
 roll2midi = "hmsm.cli:roll2midi"

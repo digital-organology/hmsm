@@ -19,7 +19,7 @@ import pathlib
 import queue
 import threading
 from dataclasses import dataclass, field
-from typing import Iterator, Optional, Tuple
+from typing import Callable, Iterator, Optional, Tuple
 
 import numpy as np
 
@@ -32,7 +32,7 @@ from hmsm.rolls.binarization import BandMasks, segment
 from hmsm.rolls.edges import RollEdges
 from hmsm.rolls.holes import extract_notes
 from hmsm.rolls.paper import PaperModel, sample_scan
-from hmsm.units import DEFAULT_DPI
+from hmsm.units import DEFAULT_DPI, mm_to_px
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,24 @@ BAND_MARGIN = 32
 
 
 @dataclass
+class RollUpdate:
+    """A synchronous preview, valid only during the callback.
+
+    Notes remain in absolute scan rows and include open notes that may grow in
+    later updates. Playback must not advance past ``safe_row``. Pixels are a
+    view of the current band; consumers should resize or persist them rather
+    than retaining full bands. Expression is resolved in the final transcription.
+    """
+
+    start: int
+    stop: int
+    pixels: np.ndarray
+    edges: Optional[RollEdges]
+    notes: np.ndarray
+    safe_row: int
+
+
+@dataclass
 class Transcription:
     """The musical content recovered from a roll scan.
 
@@ -75,6 +93,7 @@ class Transcription:
         paper: The paper and background colours the scan was read against.
         dpi: Resolution the scan was interpreted at.
         rows_processed: How many rows of the scan were read before the roll ended.
+        origin_row: Absolute scan row subtracted when rebasing the notes.
     """
 
     notes: np.ndarray
@@ -83,6 +102,7 @@ class Transcription:
     paper: Optional[PaperModel] = None
     dpi: float = DEFAULT_DPI
     rows_processed: int = 0
+    origin_row: int = 0
 
     def to_midi(self, tempo: int = 50) -> "hmsm.midi.MidiGenerator":
         """Render the transcription to MIDI.
@@ -144,13 +164,20 @@ class RollDigitizer:
             raise ValueError(f"Band height must be positive, got {self.band_height}")
         self._alignment_grid = self.profile.alignment_grid()
 
-    def run(self, source: ImageSource | str, skip_rows: int = 0) -> Transcription:
+    def run(
+        self,
+        source: ImageSource | str,
+        skip_rows: int = 0,
+        on_update: Optional[Callable[[RollUpdate], None]] = None,
+    ) -> Transcription:
         """Digitize a roll scan.
 
         Args:
             source: An open :class:`~hmsm.io.ImageSource`, or a path to open.
             skip_rows: Rows to skip from the top of the scan, to step past a
                 roll head the automatic detection cannot handle.
+            on_update: Optional synchronous callback after each band. Exceptions
+                propagate, allowing a consumer to cancel processing.
 
         Raises:
             ValueError: If no holes could be found anywhere in the scan.
@@ -161,12 +188,14 @@ class RollDigitizer:
         opened = isinstance(source, str)
         source = open_source(source) if opened else source
         try:
-            return self._run(source, skip_rows)
+            return self._run(source, skip_rows, on_update)
         finally:
             if opened:
                 source.close()
 
-    def _run(self, source: ImageSource, skip_rows: int) -> Transcription:
+    def _run(
+        self, source: ImageSource, skip_rows: int, on_update=None
+    ) -> Transcription:
         dpi = self.dpi or source.dpi or DEFAULT_DPI
         if self.dpi is None and source.dpi and source.dpi != DEFAULT_DPI:
             logger.info("Scan declares a resolution of %.0f dpi", dpi)
@@ -195,6 +224,37 @@ class RollDigitizer:
         in_playable_roll = False
         rows_processed = skip_rows
 
+        def publish(start, stop, pixels, edges=None):
+            if on_update is None:
+                return
+            merged = notes_module.merge_notes(
+                np.vstack(note_bands) if note_bands else notes_module.empty(),
+                self.profile.primary_hole_width_mm,
+                dpi,
+            )
+            # Withhold a full band as well as the merge gap. This also covers
+            # fragments rejected at a boundary by the minimum hole length.
+            gap = notes_module.MERGE_FACTOR * np.floor(
+                mm_to_px(self.profile.primary_hole_width_mm or 0, dpi)
+            )
+            # Without a nominal width, merge_notes estimates its threshold
+            # from the whole scan. Future holes could then change past merges.
+            safe_row = (
+                max(skip_rows, int(stop - self.band_height - gap))
+                if self.profile.primary_hole_width_mm is not None
+                else skip_rows
+            )
+            on_update(
+                RollUpdate(
+                    start,
+                    stop,
+                    pixels,
+                    edges,
+                    merged,
+                    safe_row,
+                )
+            )
+
         for (start, stop), band, lead in self._bands(source, skip_rows):
             masks = self._segment(band, paper, start, stop)
 
@@ -218,6 +278,7 @@ class RollDigitizer:
                     start,
                     stop,
                 )
+                publish(start, stop, band[lead : lead + stop - start])
                 continue
 
             if not in_playable_roll and masks.edges.travel > _HEAD_TRAVEL_THRESHOLD:
@@ -229,10 +290,12 @@ class RollDigitizer:
                         start,
                         stop,
                     )
+                    publish(start, stop, band[lead : lead + stop - start])
                     continue
                 logger.info("Roll appears to start at row %d", start + head_end)
                 masks = masks.crop(head_end)
                 start += head_end
+                lead += head_end
 
             if masks.ink:
                 collector.add_band(masks.ink, masks.edges, start)
@@ -252,6 +315,7 @@ class RollDigitizer:
                 in_playable_roll = True
 
             rows_processed = stop
+            publish(start, stop, band[lead : lead + stop - start], masks.edges)
 
         if not note_bands:
             raise ValueError(
@@ -276,6 +340,7 @@ class RollDigitizer:
         collector.report_uninterpreted()
 
         notes = notes_module.merge_notes(notes, self.profile.primary_hole_width_mm, dpi)
+        origin_row = int(notes[:, 0].min())
         # Notes and the dynamics line have to share a coordinate system, so
         # both move together when the music is shifted to start at row zero.
         notes, dynamics = notes_module.rebase(notes, dynamics)
@@ -290,6 +355,7 @@ class RollDigitizer:
             paper=paper,
             dpi=dpi,
             rows_processed=rows_processed,
+            origin_row=origin_row,
         )
 
     def _segment(

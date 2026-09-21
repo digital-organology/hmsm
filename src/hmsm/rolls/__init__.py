@@ -31,6 +31,7 @@ from hmsm.rolls.binarization import (
 from hmsm.rolls.digitizer import (
     DEFAULT_BAND_HEIGHT,
     RollDigitizer,
+    RollUpdate,
     Transcription,
     find_roll_start,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "PaperError",
     "PaperModel",
     "RollDigitizer",
+    "RollUpdate",
     "RollEdges",
     "Transcription",
     "assign_tracks",
