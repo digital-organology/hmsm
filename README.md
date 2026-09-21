@@ -21,6 +21,14 @@ For additional installation information see [INSTALL.md](https://github.com/digi
 
 ## Usage
 
+All functionality is reachable through a single `hmsm` command with subcommands, and each subcommand is also installed under its own name (`roll2midi`, `disc2midi`, `disc2roll`, `midi2disc`, `roll2config`) so existing scripts keep working:
+
+```{bash}
+hmsm --help              # list the subcommands
+hmsm roll2midi --help    # help for one of them
+hmsm profiles            # list the bundled format profiles
+```
+
 ### Piano Roll Digitization
 
 We support digitization for a number of formats of piano rolls out of the box, for an overview see [FORMATS.md](https://github.com/digital-organology/hmsm/blob/main/docs/FORMATS.md).
@@ -34,7 +42,7 @@ The roll scan is also expected to be somewhat straight, with a slight curvature 
 To process a roll, use the provided `roll2midi` utility, like so:
 
 ```{bash}
-roll2midi -c animatic -t 60 hupfeld_animatic_roll.tif out.mid 
+hmsm roll2midi -c animatic -t 60 hupfeld_animatic_roll.tif out.mid
 ```
 
 This will:
@@ -47,8 +55,25 @@ This will:
 For more inforamtion on the command line interface for roll digitization pass the `-h` or `--help` parameter:
 
 ```
-roll2midi --help
+hmsm roll2midi --help
 ```
+
+Roll scans are read in horizontal bands rather than loaded whole, so memory use does not grow with the length of the roll; a multi-gigabyte scan is processed in a few hundred megabytes. Band size is adjustable with `--band-height` but rarely needs changing, and it does not affect the result.
+
+### Using the package as a library
+
+```python
+from hmsm.profiles import load_profile
+from hmsm.rolls import RollDigitizer
+
+transcription = RollDigitizer(load_profile("phonola")).run("scan.tif")
+
+transcription.notes      # (n, 3) array of [start_row, end_row, tone]
+transcription.dynamics   # the printed dynamics line, if the format has one
+transcription.to_midi(tempo=60).write("out.mid")
+```
+
+See [ARCHITECTURE.md](https://github.com/digital-organology/hmsm/blob/main/docs/ARCHITECTURE.md) for how the pipeline fits together and where to hook into it.
 
 ### Cardboard Disc Digitization
 
@@ -62,7 +87,7 @@ Be sure to pass the rotation of the start position of the disc using the `--offs
 To digitize the example image included in this repository call the included command line utility, like so:
 
 ```{bash}
-disc2midi -c ariston -m cluster assets/5070081_22.JPG out.mid
+hmsm disc2midi -c ariston -m cluster assets/5070081_22.JPG out.mid
 ```
 
 ### Midi to Disc Transformation
@@ -72,7 +97,7 @@ We currently include a profile for the Ariston 24 type of disc, though it should
 You can test this with any midi file of your choosing, any notes that are not contained in the given format will be dropped automatically.
 
 ```{bash}
-midi2disc -t ariston_24 -s 4000 -n "Title can have<br>multiple lines" input.mid output.png
+hmsm midi2disc -t ariston_24 -s 4000 -n "Title can have<br>multiple lines" input.mid output.png
 ```
 
 Though this is not a core feature of our application we used midis generated from original discs to verify that the results are close to the original media.
@@ -85,8 +110,19 @@ It should generally work with all circular media types as long as there is suffi
 To transform the included color photography of the same disc as used above run:
 
 ```{bash}
-disc2roll --offset 92 assets/5070081_11.JPG roll.JPG
+hmsm disc2roll --offset 92 assets/5070081_11.JPG roll.JPG
 ```
+
+## Development
+
+There is a test suite covering the roll pipeline and the shared layers:
+
+```{bash}
+pip install -e ".[dev]"
+pytest
+```
+
+Tests that need a real scan skip themselves when the scan is not present, so the suite runs on a clean checkout.
 
 ## License
 
