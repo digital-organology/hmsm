@@ -7,7 +7,7 @@ import pytest
 
 from hmsm.io import ArraySource
 from hmsm.profiles import RollProfile
-from hmsm.rolls import RollDigitizer, guess_background
+from hmsm.rolls import PaperModel, RollDigitizer
 from hmsm.rolls.digitizer import find_roll_start
 from hmsm.rolls.edges import RollEdges
 
@@ -24,8 +24,7 @@ def profile():
     return RollProfile.from_dict(
         {
             "roll_width_mm": 160.0,
-            "binarization_method": "v_channel",
-            "binarization_options": {"threshold": 0.1},
+            "binarization_method": "paper_relative",
             "hole_width_mm": 1.0,
             "track_measurements": [
                 {"left": 40.0, "right": 52.0, "tone": 60},
@@ -100,14 +99,23 @@ def test_transcription_renders_to_midi(synthetic_roll, profile, tmp_path):
     assert len(notes) == len(transcription.notes)
 
 
-def test_background_detection_reads_the_margins(synthetic_roll):
-    assert guess_background(ArraySource(synthetic_roll)) == "black"
-    assert guess_background(ArraySource(255 - synthetic_roll)) == "white"
+def test_background_detection_reads_the_scan(synthetic_roll):
+    from hmsm.rolls.paper import sample_scan
+
+    dark = PaperModel.estimate(sample_scan(ArraySource(synthetic_roll)))
+    light = PaperModel.estimate(sample_scan(ArraySource(255 - synthetic_roll)))
+    assert dark.background_name == "black"
+    assert light.background_name == "white"
 
 
-def test_background_detection_is_deterministic(synthetic_roll):
-    source = ArraySource(synthetic_roll)
-    assert len({guess_background(source) for _ in range(5)}) == 1
+def test_a_white_background_scan_transcribes_to_the_same_notes(synthetic_roll, profile):
+    # The same roll photographed over a white bed rather than a black one:
+    # the holes are now the lightest thing in the scan instead of the
+    # darkest, and nothing about the format has changed.
+    inverted = 255 - synthetic_roll
+    on_black = RollDigitizer(profile, band_height=150).run(ArraySource(synthetic_roll))
+    on_white = RollDigitizer(profile, band_height=150).run(ArraySource(inverted))
+    np.testing.assert_array_equal(on_black.notes, on_white.notes)
 
 
 def test_roll_start_is_zero_for_a_straight_roll():

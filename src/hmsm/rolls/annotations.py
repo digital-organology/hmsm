@@ -1,145 +1,216 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
-"""Reading the markings printed or drawn onto a roll.
+"""Reading the markings printed onto a roll.
 
-Some formats carry a continuous dynamics line along one side of the roll and,
-next to it, discrete pedal markers.  Neither is punched, so they come from the
-annotation mask rather than the hole mask, and both have to be reassembled
-from the fragments the mask breaks them into.
+Where a punched hole is a hole, printing is a shape that has to be recognised
+for what it is.  A Hupfeld Phonola carries the word "Ped." and a printer's
+flower down its bass edge, opening and closing the sustain pedal between
+them, and a dotted line just inside them whose distance from the edge is the
+dynamic the pianolist is asked for.  An Aeolian Themodist Metrostyle adds a
+red tempo line in a lane of its own.
 
-The two are told apart by where they sit across the roll: a profile's
-``pedal_cutoff`` says which side of the roll the pedal markers occupy.
+Each of those lanes arrives here as its own mask, cut out by the profile's
+:class:`~hmsm.profiles.InkLayer` declarations, and is interpreted according to
+the layer's role.  Fragments are gathered band by band and only assembled at
+the end of the scan, because both a line and a sequence of pedal markers only
+make sense whole.
+
+Everything here is measured in millimetres and converted with the scan's own
+resolution, so the same thresholds hold for a 300 dpi and a 600 dpi scan.
+Positions across the roll are kept relative to the left paper edge, so a roll
+that wanders sideways down a fifty foot scan does not read as a crescendo.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
-import cv2
 import numpy as np
 import scipy.signal
-import scipy.spatial
 
+from hmsm.midi.controls import ControlCode
+from hmsm.profiles import InkLayer
+from hmsm.rolls.binarization import InkMask
 from hmsm.rolls.edges import RollEdges
 from hmsm.rolls.holes import find_components
-from hmsm.rolls.notes import ControlCode
+from hmsm.units import DEFAULT_DPI, mm_to_px
 
 logger = logging.getLogger(__name__)
 
-#: Fragments smaller than this are scanning noise rather than ink.
-_MIN_AREA = 200
-_MIN_AREA_WITH_PEDAL = 250
+#: Smallest and largest piece of ink taken seriously, in square millimetres.
+#: Below the first is scanner noise and paper grain, above the second is a
+#: label or a title rather than a marking.
+MIN_INK_MM2 = 0.3
+MAX_INK_MM2 = 500.0
 
-#: Below this many fragments the "annotations" are noise and the roll simply
-#: has no printed dynamics line.
-_MIN_DYNAMICS_POINTS = 200
+#: Longest gap along the roll between two marks of the same dynamics line, in
+#: millimetres. A dotted line leaves a few millimetres between dots and rather
+#: more where the ink has failed; beyond this the line has ended.
+DYNAMICS_MAX_GAP_MM = 45.0
 
-#: A pedal marker is a solid printed block; smaller blobs are line fragments.
-_MIN_PEDAL_AREA = 3000
+#: What one mark is worth to a trace, in millimetres of sideways wander. A
+#: trace takes a mark in only if the detour to reach it costs less than this,
+#: which is what keeps an accent mark or a stray word off the line. It is the
+#: only thing that decides what belongs to the line: a step of any length is
+#: allowed and simply costs what it is long, so the line may change direction
+#: as sharply as it likes and still be followed, while a mark far off it is
+#: never worth the detour there and back.
+DYNAMICS_MARK_VALUE_MM = 15.0
 
-#: Pedal marker fragments closer together than this are one marker.
-_PEDAL_MERGE_DISTANCE = 100
+#: Marks a trace may look back over for its predecessor. Only reached where
+#: several pieces of ink share a stretch of roll with the line.
+DYNAMICS_LOOKBACK = 48
 
-#: Multiple of the typical nearest-neighbour spacing within which a fragment
-#: must have company to be considered part of the line rather than a speck.
-_NEIGHBOUR_FACTOR = 2.5
-_MIN_NEIGHBOURS = 2
+#: Marks the traced line needs before it is believed to be a line at all.
+MIN_DYNAMICS_MARKS = 40
 
-#: Window and order for smoothing the reconstructed dynamics line.
-_SMOOTHING_WINDOW = 500
-_SMOOTHING_ORDER = 2
+#: Fraction of the inked length of the lane the traced line has to span. A
+#: printed line runs the length of the roll; a run of accent marks that
+#: happens to trace nicely does not.
+MIN_DYNAMICS_COVERAGE = 0.5
+
+#: Window and order for smoothing the reconstructed dynamics line, in
+#: millimetres of roll and polynomial degree.
+DYNAMICS_SMOOTHING_MM = 42.0
+DYNAMICS_SMOOTHING_ORDER = 2
+
+#: Smallest printed pedal marker, in square millimetres. Hupfeld's flower is
+#: the small one of the pair and covers rather more than this.
+MIN_PEDAL_MM2 = 8.0
+
+#: Fragments of printing closer together than this along the roll are one
+#: marker: the dot of a "Ped." is not a marker of its own.
+PEDAL_MERGE_MM = 8.0
+
+#: Pedal markers needed before the sequence is believed to be a sequence.
+MIN_PEDAL_MARKERS = 6
+
+
+@dataclass(frozen=True)
+class Fragments:
+    """Pieces of ink collected from one layer over a whole scan.
+
+    Attributes:
+        row: Position along the roll of each fragment's centre, in scan rows.
+        column: Position across the roll of each fragment's centre, in pixels
+            from the left paper edge.
+        left: Left side of each fragment, likewise.
+        right: Right side of each fragment, likewise.
+        area: Set pixels in each fragment.
+    """
+
+    row: np.ndarray
+    column: np.ndarray
+    left: np.ndarray
+    right: np.ndarray
+    area: np.ndarray
+
+    def __len__(self) -> int:
+        return len(self.row)
+
+    @property
+    def width(self) -> np.ndarray:
+        return self.right - self.left
 
 
 @dataclass
 class AnnotationCollector:
-    """Accumulates annotation fragments across the bands of a scan.
-
-    Fragments are gathered band by band and only assembled into a dynamics
-    line and pedal events once the whole scan has been read, because both need
-    to reason about the annotation as a whole.
+    """Accumulates printed markings across the bands of a scan.
 
     Attributes:
-        pedal_cutoff: Fraction of the roll width separating pedal markers from
-            the dynamics line, or None if the format has no printed pedal
-            markers. Values of 0.5 or below put the markers on the left.
+        layers: The ink layers the profile declares, which decide both what
+            masks arrive here and what is made of each.
+        dpi: Resolution the scan is interpreted at.
     """
 
-    pedal_cutoff: Optional[float] = None
-    _line: List[np.ndarray] = field(default_factory=list, repr=False)
-    _pedal: List[np.ndarray] = field(default_factory=list, repr=False)
+    layers: Sequence[InkLayer] = ()
+    dpi: float = DEFAULT_DPI
+    _fragments: Dict[str, List[np.ndarray]] = field(default_factory=dict, repr=False)
 
-    @property
-    def min_area(self) -> int:
-        return _MIN_AREA if self.pedal_cutoff is None else _MIN_AREA_WITH_PEDAL
-
-    def add_band(self, mask: np.ndarray, edges: RollEdges, row_offset: int = 0) -> None:
-        """Collect the annotation fragments in one band.
+    def add_band(
+        self, ink: Mapping[str, InkMask], edges: RollEdges, row_offset: int = 0
+    ) -> None:
+        """Collect the ink fragments in one band.
 
         Args:
-            mask: The band's annotation mask.
+            ink: One mask per layer, as segmentation produced them.
             edges: Roll edges for the band.
             row_offset: Row the band starts at, added to the recorded positions.
         """
-        if self.pedal_cutoff is not None:
-            # Pedal markers are solid blocks; closing the gaps the scan leaves
-            # in them keeps a single marker from splitting into fragments that
-            # each fall below the area threshold.
-            mask = cv2.dilate(mask, _DIAMOND_5)
+        low = mm_to_px(1.0, self.dpi) ** 2 * MIN_INK_MM2
+        high = mm_to_px(1.0, self.dpi) ** 2 * MAX_INK_MM2
 
-        components = find_components(mask)
-        if len(components) == 0:
-            return
+        for name, lane in ink.items():
+            if lane.mask.size == 0:
+                continue
 
-        # Reject specks, and reject anything large enough to be the roll
-        # margin rather than ink.
-        max_area = mask.shape[0] + mask.shape[1] * 10
-        keep = (components.area >= self.min_area) & (components.area <= max_area)
-        components = components.select(keep)
-        if len(components) == 0:
-            return
+            components = find_components(lane.mask)
+            if len(components) == 0:
+                continue
 
-        centers = components.centroid
-        rows = np.clip(np.trunc(centers[:, 0]).astype(np.int64), 0, len(edges) - 1)
+            keep = (components.area >= low) & (components.area <= high)
+            components = components.select(keep)
+            if len(components) == 0:
+                continue
 
-        if self.pedal_cutoff is None:
-            self._line.append(centers + (row_offset, 0))
-            return
-
-        boundary = edges.left[rows] + edges.width[rows] * self.pedal_cutoff
-        columns = np.trunc(centers[:, 1]).astype(np.int64)
-        is_pedal = (
-            columns < boundary if self.pedal_cutoff <= 0.5 else columns > boundary
-        )
-
-        if is_pedal.any():
-            pedal = components.select(is_pedal)
-            pedal_rows = rows[is_pedal]
-            self._pedal.append(
+            rows = np.clip(
+                np.rint(components.centroid[:, 0]).astype(np.int64), 0, len(edges) - 1
+            )
+            # Positions come out of the lane's own coordinates; put them back
+            # into the band's, then measure them from the left paper edge.
+            origin = edges.left[rows] - lane.column_offset
+            self._fragments.setdefault(name, []).append(
                 np.column_stack(
                     (
-                        pedal_rows + row_offset,
-                        pedal.area,
-                        pedal.right - edges.left[pedal_rows],
-                        pedal.left - edges.left[pedal_rows],
+                        rows + row_offset,
+                        components.centroid[:, 1] - origin,
+                        components.left - origin,
+                        components.right - origin,
+                        components.area,
                     )
-                ).astype(np.int64)
+                ).astype(np.float64)
             )
 
-        if (~is_pedal).any():
-            self._line.append(centers[~is_pedal] + (row_offset, 0))
+    def fragments(self, name: str) -> Optional[Fragments]:
+        """Everything collected from one layer, or None if it stayed empty."""
+        parts = self._fragments.get(name)
+        if not parts:
+            return None
+        stacked = np.vstack(parts)
+        order = stacked[:, 0].argsort(kind="stable")
+        stacked = stacked[order]
+        return Fragments(
+            row=stacked[:, 0],
+            column=stacked[:, 1],
+            left=stacked[:, 2],
+            right=stacked[:, 3],
+            area=stacked[:, 4],
+        )
+
+    def _first_with_role(self, role: str) -> Optional[Fragments]:
+        for layer in self.layers:
+            if layer.role == role:
+                found = self.fragments(layer.name)
+                if found is None:
+                    logger.info(
+                        "Layer '%s' (%s) held no printing at all", layer.name, role
+                    )
+                return found
+        return None
 
     def dynamics_line(self) -> Optional[np.ndarray]:
         """Reconstruct the dynamics line, or None if the roll has none.
 
         Returns:
             An ``(n, 2)`` array of ``[row, column]``, one entry for every row
-            the line spans, or None.
+            the line spans, with the column measured from the left paper edge.
         """
-        if not self._line:
+        found = self._first_with_role("dynamics")
+        if found is None:
             return None
-        return reconstruct_dynamics_line(np.vstack(self._line))
+        return trace_line(found, self.dpi)
 
     def pedal_events(self) -> Optional[np.ndarray]:
         """Turn the collected pedal markers into note table rows, or None.
@@ -147,101 +218,248 @@ class AnnotationCollector:
         Returns:
             An ``(n, 3)`` note table of pedal-down spans, or None.
         """
-        if not self._pedal:
+        found = self._first_with_role("pedal")
+        if found is None:
             return None
-        return reconstruct_pedal_events(np.vstack(self._pedal))
+        return pedal_spans(found, self.dpi)
+
+    def report_uninterpreted(self) -> None:
+        """Log what was found in layers the pipeline does not read."""
+        for layer in self.layers:
+            if layer.is_interpreted:
+                continue
+            found = self.fragments(layer.name)
+            logger.info(
+                "Layer '%s' has role '%s', which this pipeline does not "
+                "interpret; its %d fragment(s) were segmented and discarded",
+                layer.name,
+                layer.role,
+                0 if found is None else len(found),
+            )
 
 
-def reconstruct_dynamics_line(points: np.ndarray) -> Optional[np.ndarray]:
-    """Fit a continuous dynamics line through the collected fragments.
+def trace_line(fragments: Fragments, dpi: float = DEFAULT_DPI) -> Optional[np.ndarray]:
+    """Follow a printed line through the marks it is made of.
 
-    The line arrives as a cloud of fragment centres with gaps where the ink is
-    faint. Isolated points are dropped as noise, points sharing a row are
-    averaged, the gaps are filled by linear interpolation, and the result is
-    smoothed.
+    A dynamics line is single valued along the roll: at any point down the
+    paper it is at one distance from the edge, and from one mark to the next
+    it has not moved far. On a Hupfeld roll it shares the lane with accent
+    marks, printer's ornament and the maker's own watermark, so which ink is
+    the line cannot be decided one mark at a time; it is decided by which
+    *sequence* of marks makes a line.
+
+    So this picks the best such sequence outright. Every mark may follow any
+    earlier mark within reach along the roll, at a cost of however far
+    sideways that step is, and every mark taken in is worth a fixed credit
+    against that cost. The best-scoring chain is the line: it takes in the
+    dots because they are cheap to reach and leaves out an accent mark a
+    thousand pixels off the line because no credit covers the detour there
+    and back.
 
     Args:
-        points: ``(n, 2)`` array of ``[row, column]`` fragment centres.
+        fragments: Ink collected from the layer the line is printed in.
+        dpi: Resolution the scan is interpreted at.
 
     Returns:
-        An ``(n, 2)`` int array of ``[row, column]`` covering every row between
-        the first and last fragment, or None if there is no line to be found.
+        An ``(n, 2)`` int array of ``[row, column]`` covering every row from
+        the first mark to the last, or None if there is no line to be found.
     """
-    if len(points) < _MIN_DYNAMICS_POINTS:
+    if len(fragments) < MIN_DYNAMICS_MARKS:
         logger.info(
-            "Found only %d annotation fragments, too few for a dynamics line; "
-            "this roll most likely has none and these are noise. Skipping.",
-            len(points),
+            "Found only %d piece(s) of ink in the dynamics lane, too few for a "
+            "line; this roll most likely has none. Skipping.",
+            len(fragments),
         )
         return None
 
-    points = np.trunc(points).astype(np.int64)
-    points = _drop_isolated(points)
+    chosen = _trace_marks(
+        fragments.row,
+        fragments.column,
+        max_gap=mm_to_px(DYNAMICS_MAX_GAP_MM, dpi),
+        mark_value=mm_to_px(DYNAMICS_MARK_VALUE_MM, dpi),
+    )
 
-    if len(points) == 0:
-        logger.info("No annotation fragments survived noise filtering, skipping.")
+    if len(chosen) < MIN_DYNAMICS_MARKS:
+        logger.info(
+            "Only %d of %d piece(s) of ink in the dynamics lane form a line; "
+            "treating them as noise and skipping.",
+            len(chosen),
+            len(fragments),
+        )
         return None
 
-    rows, columns = _average_per_row(points)
+    rows = fragments.row[chosen]
+    columns = fragments.column[chosen]
 
-    if len(rows) < 2:
-        logger.info("Dynamics line spans a single row only, skipping.")
+    inked = fragments.row[-1] - fragments.row[0]
+    coverage = (rows[-1] - rows[0]) / inked if inked > 0 else 0.0
+    if coverage < MIN_DYNAMICS_COVERAGE:
+        logger.info(
+            "The best line through the dynamics lane spans only %.0f%% of the "
+            "inked length of the roll, which is too little to be the printed "
+            "line. Skipping.",
+            coverage * 100,
+        )
         return None
 
-    dense_rows = np.arange(rows[0], rows[-1] + 1)
+    dense_rows = np.arange(int(rows[0]), int(rows[-1]) + 1)
     dense_columns = np.interp(dense_rows, rows, columns)
 
-    window = _odd_at_most(min(_SMOOTHING_WINDOW, len(dense_rows)))
-    if window > _SMOOTHING_ORDER:
+    window = _odd_at_most(
+        min(int(mm_to_px(DYNAMICS_SMOOTHING_MM, dpi)), len(dense_rows))
+    )
+    if window > DYNAMICS_SMOOTHING_ORDER:
         dense_columns = scipy.signal.savgol_filter(
-            dense_columns, window, _SMOOTHING_ORDER
+            dense_columns, window, DYNAMICS_SMOOTHING_ORDER
         )
     else:
         logger.debug("Dynamics line too short to smooth (%d rows)", len(dense_rows))
 
-    # Smoothing can overshoot at the ends; a column index outside the scan is
-    # meaningless and used to wrap around when cast to an unsigned type.
-    np.clip(dense_columns, 0, None, out=dense_columns)
+    logger.debug(
+        "Dynamics line traced over %d rows through %d of %d mark(s)",
+        len(dense_rows),
+        len(chosen),
+        len(fragments),
+    )
 
     return np.column_stack((dense_rows, np.rint(dense_columns).astype(np.int64)))
 
 
-def reconstruct_pedal_events(markers: np.ndarray) -> Optional[np.ndarray]:
-    """Pair up pedal markers into the spans over which the pedal is down.
+def _trace_marks(
+    rows: np.ndarray,
+    columns: np.ndarray,
+    max_gap: float,
+    mark_value: float,
+    lookback: int = DYNAMICS_LOOKBACK,
+) -> np.ndarray:
+    """Find the best-scoring chain of marks through a lane.
 
-    The markers alternate: a wide one opens a span, a narrow one closes it.
-    Where one is missed, the neighbouring markers decide how to read the one
-    in hand.
+    A chain scores ``mark_value`` for every mark it takes in, less the
+    sideways distance it travels between them, and may only step between
+    marks close enough together along the roll to be the same line. Since
+    every step goes forward, the best chain ending at each mark can be built
+    up in one pass over the marks in order.
 
     Args:
-        markers: ``(n, 4)`` array of ``[row, area, right, left]``, the last two
-            measured from the left roll edge.
+        rows: Position of each mark along the roll, ascending.
+        columns: Position of each mark across the roll.
+        max_gap: Furthest apart along the roll two consecutive marks may be.
+        mark_value: What one mark is worth, in pixels of sideways wander.
+        lookback: How many earlier marks each mark may follow. Reached only
+            where several pieces of ink share a stretch of roll with the line.
+
+    Returns:
+        The indices of the chosen marks, ascending.
+    """
+    count = len(rows)
+    score = np.full(count, mark_value, dtype=np.float64)
+    came_from = np.full(count, -1, dtype=np.int64)
+
+    for index in range(1, count):
+        first = max(0, index - lookback)
+        within_reach = rows[index] - rows[first:index] <= max_gap
+        if not within_reach.any():
+            continue
+
+        step = np.abs(columns[index] - columns[first:index])
+        candidates = np.where(within_reach, score[first:index] - step, -np.inf)
+
+        best = int(candidates.argmax())
+        if candidates[best] > 0.0:
+            score[index] += candidates[best]
+            came_from[index] = first + best
+
+    chain = []
+    index = int(score.argmax())
+    while index >= 0:
+        chain.append(index)
+        index = int(came_from[index])
+
+    return np.array(chain[::-1], dtype=np.int64)
+
+
+def pedal_spans(fragments: Fragments, dpi: float = DEFAULT_DPI) -> Optional[np.ndarray]:
+    """Pair printed pedal markers into the spans over which the pedal is down.
+
+    The markers alternate: a wide one, the word "Ped.", opens a span and a
+    narrow one, a printer's flower, closes it. Where one is missed the
+    neighbouring markers decide how to read the one in hand.
+
+    Args:
+        fragments: Ink collected from the layer the markers are printed in.
+        dpi: Resolution the scan is interpreted at.
 
     Returns:
         An ``(n, 3)`` note table of pedal-down spans, or None if the markers
         look like noise.
     """
-    markers = markers[markers[:, 1] > _MIN_PEDAL_AREA]
-    if len(markers) == 0:
-        logger.info("No pedal markers large enough to be genuine, skipping.")
-        return None
+    markers = _merge_into_markers(fragments, mm_to_px(PEDAL_MERGE_MM, dpi))
 
-    markers = markers[markers[:, 0].argsort()]
-    markers = _merge_close_markers(markers)
+    big_enough = markers.area >= mm_to_px(1.0, dpi) ** 2 * MIN_PEDAL_MM2
+    rows, widths = markers.row[big_enough], markers.width[big_enough]
 
-    if len(markers) < 10:
+    if len(rows) < MIN_PEDAL_MARKERS:
         logger.info(
-            "Found only %d pedal markers, which likely means the roll has no "
-            "pedal annotations and these are noise. Skipping.",
-            len(markers),
+            "Found only %d printed pedal marker(s), which most likely means "
+            "the roll has none and these are noise. Skipping.",
+            len(rows),
         )
         return None
 
-    widths = markers[:, 2] - markers[:, 3]
-    is_wide = widths > widths.mean()
+    is_wide = widths > _split_point(widths)
+    spans = _pair_markers(rows, is_wide)
 
-    spans = []
-    opened_at = None
+    if not spans:
+        logger.info("Pedal markers could not be paired into any spans, skipping.")
+        return None
+
+    logger.debug(
+        "Paired %d pedal marker(s) into %d span(s)", int(big_enough.sum()), len(spans)
+    )
+    return np.array(
+        [(start, end, int(ControlCode.PEDAL)) for start, end in spans], dtype=np.int64
+    )
+
+
+def _merge_into_markers(fragments: Fragments, distance: float) -> Fragments:
+    """Fuse fragments close enough along the roll to be one printed marker."""
+    if len(fragments) == 0:
+        return fragments
+
+    group = np.zeros(len(fragments), dtype=np.int64)
+    if len(fragments) > 1:
+        group[1:] = np.cumsum(np.diff(fragments.row) > distance)
+
+    first = np.flatnonzero(np.append(True, np.diff(group) != 0))
+    return Fragments(
+        row=fragments.row[first],
+        column=np.add.reduceat(fragments.column * fragments.area, first)
+        / np.add.reduceat(fragments.area, first),
+        left=np.minimum.reduceat(fragments.left, first),
+        right=np.maximum.reduceat(fragments.right, first),
+        area=np.add.reduceat(fragments.area, first),
+    )
+
+
+def _split_point(widths: np.ndarray) -> float:
+    """Where to cut a set of marker widths into a narrow and a wide group.
+
+    One step of two-means, seeded on either side of the median. That is
+    robust where the plain mean is not: pedal markings come in long runs of
+    one kind, and a run of wide ones pulls the mean above the narrow ones.
+    """
+    middle = np.median(widths)
+    narrow = widths[widths <= middle]
+    wide = widths[widths > middle]
+    if len(narrow) == 0 or len(wide) == 0:
+        return float(middle)
+    return float((np.median(narrow) + np.median(wide)) / 2)
+
+
+def _pair_markers(rows: np.ndarray, is_wide: np.ndarray) -> List[Tuple[int, int]]:
+    """Read an alternating sequence of wide and narrow markers into spans."""
+    spans: List[Tuple[int, int]] = []
+    opened_at: Optional[int] = None
 
     for i, wide in enumerate(is_wide):
         last = i + 1 >= len(is_wide)
@@ -250,92 +468,20 @@ def reconstruct_pedal_events(markers: np.ndarray) -> Optional[np.ndarray]:
             # the next marker is also wide, in which case this one is really
             # the missing close.
             if not last and (opened_at is None or not is_wide[i + 1]):
-                opened_at = markers[i, 0]
+                opened_at = int(rows[i])
             elif opened_at is not None:
-                spans.append((opened_at, markers[i, 0]))
+                spans.append((opened_at, int(rows[i])))
                 opened_at = None
         else:
             if opened_at is not None:
-                spans.append((opened_at, markers[i, 0]))
+                spans.append((opened_at, int(rows[i])))
                 opened_at = None
             elif not last and not is_wide[i + 1]:
-                opened_at = markers[i, 0]
+                opened_at = int(rows[i])
 
-    if not spans:
-        logger.info("Pedal markers could not be paired into any spans, skipping.")
-        return None
-
-    return np.array(
-        [(start, end, int(ControlCode.PEDAL)) for start, end in spans], dtype=np.int64
-    )
-
-
-def _drop_isolated(points: np.ndarray) -> np.ndarray:
-    """Drop fragments that have too few neighbours to be part of a line.
-
-    A tree query rather than a full distance matrix, so this stays usable on
-    the tens of thousands of fragments a long roll produces.
-    """
-    tree = scipy.spatial.cKDTree(points)
-
-    # Distance to the nearest fragment that is not at the same spot.
-    coincident = tree.query_ball_point(points, r=0, return_length=True)
-    nearest = tree.query(points, k=min(len(points), 16))[0]
-    nearest = np.where(nearest > 0, nearest, np.inf).min(axis=1)
-    nearest = nearest[np.isfinite(nearest)]
-    if len(nearest) == 0:
-        return points
-
-    radius = _NEIGHBOUR_FACTOR * nearest.mean()
-    within = tree.query_ball_point(points, r=radius, return_length=True)
-    return points[(within - coincident) > _MIN_NEIGHBOURS]
-
-
-def _average_per_row(points: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Collapse fragments sharing a row into one column position per row."""
-    order = points[:, 0].argsort(kind="stable")
-    points = points[order]
-    rows, first = np.unique(points[:, 0], return_index=True)
-    counts = np.diff(np.append(first, len(points)))
-    columns = np.add.reduceat(points[:, 1], first) / counts
-    return rows, columns
-
-
-def _merge_close_markers(markers: np.ndarray) -> np.ndarray:
-    """Fuse marker fragments that are close enough to be one marker."""
-    group = np.zeros(len(markers), dtype=np.int64)
-    if len(markers) > 1:
-        group[1:] = np.cumsum(np.diff(markers[:, 0]) > _PEDAL_MERGE_DISTANCE)
-
-    first = np.flatnonzero(np.append(True, np.diff(group) != 0))
-    return np.column_stack(
-        (
-            markers[first, 0],
-            np.add.reduceat(markers[:, 1], first),
-            np.maximum.reduceat(markers[:, 2], first),
-            np.minimum.reduceat(markers[:, 3], first),
-        )
-    )
+    return spans
 
 
 def _odd_at_most(value: int) -> int:
     """The largest odd number not greater than ``value``."""
     return value if value % 2 else value - 1
-
-
-_DIAMOND_5 = np.array(
-    [
-        [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
-        [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0],
-        [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
-        [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-        [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0],
-        [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
-    ],
-    dtype=np.uint8,
-)

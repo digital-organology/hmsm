@@ -11,8 +11,8 @@ We provide specific configuration profiles for some of these formats with the ap
 
 | Provided Preset Name | Applicable Formats | Support for Midi Creation | Support for Control Information | Notes |
 | -------------------- | ------------------ | ------------------------- | ------------------------------- | ----- |
-| `animatic` | Hupfeld 88 Animatic, Hupfeld 88 Animatic T, Hupfeld 88 Animatic Clavitist | ✅ | Complete Support for Animatic rolls, Support for Animatic T and Animatic Clavitist limited to the functionality level of Animatic | A very small number (<0.1%) of false positives may currently occure, where parts of the printed dynamics line are misinterpreted as holes in the roll |
-| `phonola` | Hupfeld 73 Phonola | ✅ | ✅ | Printed information (dynamics line, pedal annotations) is automatically extracted and processed but might be subject to small inaccuracies |
+| `animatic` | Hupfeld 88 Animatic, Hupfeld 88 Animatic T, Hupfeld 88 Animatic Clavitist | ✅ | Complete Support for Animatic rolls, Support for Animatic T and Animatic Clavitist limited to the functionality level of Animatic | The printed dynamics line is as dark as a punched hole in places; it is told apart by colour rather than by darkness and is not read as holes. Accentuation marks, where present, are not extracted |
+| `phonola` | Hupfeld 73 Phonola | ✅ | ✅ | Printed information (dynamics line, pedal annotations) is automatically extracted and processed but might be subject to small inaccuracies. Accentuation marks are not extracted |
 | `phonola_solodant` | Hupfeld 73 Phonola Solodant | ✅ | ✅ | See `phonola` |
 | `clavitist` | Hupfeld Clavitist, Hupfeld Clavitist Spezialrolle, Hupfeld Clavitist Universal | ✅ | Pedal control supported, other control tracks currently unspported | |
 
@@ -36,8 +36,20 @@ This table has the control information currenlty supported for automatic extract
 | ------------ | ----------- | -------------- |
 | `-3` | Pedal information on Hupfeld type rolls. The pedal is set to on at the beginning of the roll and toggled off while this track is active. | ✅ |
 | `-10`, `-11`, `-20`, `-21` | Dynamics information on some Hupfeld type rolls. Notes beeing played while these tracks are active will have increased velocity. Always used in pairs and separate for bass (`-10`, `-11`) and discant (`-20`, `-21`). | ✅ |
-| `N/A` | Printed dynamics information | Generally fully supported, however anomalies might occure where annotations are in very similar color to the scan background |
+| `N/A` | Printed dynamics information | ✅ Extracted relative to the paper colour, so faint printing and aged or coloured paper are handled. The line is followed across the note tracks and past accent marks and watermarks sharing its lane |
 | `N/A` | Printed pedal information | ✅ |
+| `N/A` | Printed accentuation marks (Hupfeld Phonola) | ❌ Segmented if declared as an `ink_layer`, but not interpreted; there is no control code for them |
+| `N/A` | Printed tempo line (Aeolian Metrostyle) | ❌ As above. Telling a red tempo line from a grey dynamics line in the same lane needs the `chroma` channel, which nothing reads yet |
+
+## Paper and Background Colours
+
+Paper colour and scanner background are properties of a scan, not of a format, and are not configured.
+They are read off the scan: the paper is whatever the scan is mostly made of, the background is whatever shows through a hole.
+Every threshold in the default segmentation is expressed against those two, so beige, pink, red and green paper, black and white scanner beds, and paper that has darkened unevenly over a century all work without retuning.
+
+Pass `--background black` or `--background white` to `roll2midi` where a scan is unusual enough that the automatic choice goes wrong — for instance a dark red Welte roll photographed over a white bed, where the paper is closer to the dark extreme than to the light one.
+
+The formats the presets below were validated against are all on beige paper over a black background, since those are the scans in hand; the coloured-paper cases are supported by construction rather than by testing.
 
 ## Adding Support for Additional Formats
 

@@ -25,12 +25,13 @@ import numpy as np
 
 import hmsm.midi
 from hmsm.io import ImageSource, open_source
-from hmsm.profiles import RollProfile
+from hmsm.profiles import HOLE_DENSITY_BOUNDS, RollProfile
 from hmsm.rolls import annotations as annotations_module
 from hmsm.rolls import notes as notes_module
 from hmsm.rolls.binarization import BandMasks, segment
 from hmsm.rolls.edges import RollEdges
 from hmsm.rolls.holes import extract_notes
+from hmsm.rolls.paper import PaperModel, sample_scan
 from hmsm.units import DEFAULT_DPI
 
 logger = logging.getLogger(__name__)
@@ -66,8 +67,12 @@ class Transcription:
         notes: ``(n, 3)`` note table of ``[start_row, end_row, tone]``, in scan
             rows. Negative tones are control codes; see :mod:`hmsm.rolls.notes`.
         dynamics: ``(n, 2)`` array of ``[row, column]`` tracing the printed
-            dynamics line, or None where the format has none.
+            dynamics line, or None where the format has none. The column is
+            measured from the left paper edge rather than from the edge of the
+            scan, so a roll that drifts sideways down a long scan does not
+            read as a slow crescendo.
         profile: The profile the scan was read with.
+        paper: The paper and background colours the scan was read against.
         dpi: Resolution the scan was interpreted at.
         rows_processed: How many rows of the scan were read before the roll ended.
     """
@@ -75,6 +80,7 @@ class Transcription:
     notes: np.ndarray
     dynamics: Optional[np.ndarray]
     profile: RollProfile
+    paper: Optional[PaperModel] = None
     dpi: float = DEFAULT_DPI
     rows_processed: int = 0
 
@@ -165,23 +171,32 @@ class RollDigitizer:
         if self.dpi is None and source.dpi and source.dpi != DEFAULT_DPI:
             logger.info("Scan declares a resolution of %.0f dpi", dpi)
 
-        background = self.background
-        if background == "guess":
-            background = guess_background(source)
-            logger.info("Detected a %s scan background", background)
+        paper = PaperModel.estimate(
+            sample_scan(source),
+            dpi=dpi,
+            background=None if self.background == "guess" else self.background,
+        )
+        logger.info(
+            "Reading %s paper against a %s background",
+            _describe(paper.paper),
+            paper.background_name,
+        )
 
         if self.debug_dir:
             pathlib.Path(self.debug_dir).mkdir(parents=True, exist_ok=True)
 
         width_bounds = self.profile.hole_width_bounds_px(dpi)
-        collector = annotations_module.AnnotationCollector(self.profile.pedal_cutoff)
+        height_bounds = self.profile.hole_length_bounds_px(dpi)
+        collector = annotations_module.AnnotationCollector(
+            self.profile.ink_layers, dpi=dpi
+        )
 
         note_bands: list[np.ndarray] = []
         in_playable_roll = False
         rows_processed = skip_rows
 
         for (start, stop), band, lead in self._bands(source, skip_rows):
-            masks = self._segment(band, background, start, stop)
+            masks = self._segment(band, paper, start, stop)
 
             if masks is not None:
                 # Drop the context rows; from here on the masks line up with
@@ -219,11 +234,17 @@ class RollDigitizer:
                 masks = masks.crop(head_end)
                 start += head_end
 
-            if masks.annotations is not None:
-                collector.add_band(masks.annotations, masks.edges, start)
+            if masks.ink:
+                collector.add_band(masks.ink, masks.edges, start)
 
             band_notes = extract_notes(
-                masks.holes, masks.edges, self._alignment_grid, width_bounds, start
+                masks.holes,
+                masks.edges,
+                self._alignment_grid,
+                width_bounds,
+                height_bounds,
+                HOLE_DENSITY_BOUNDS,
+                start,
             )
 
             if len(band_notes):
@@ -252,6 +273,8 @@ class RollDigitizer:
         if dynamics is not None:
             logger.info("Recovered a dynamics line over %d rows", len(dynamics))
 
+        collector.report_uninterpreted()
+
         notes = notes_module.merge_notes(notes, self.profile.primary_hole_width_mm, dpi)
         # Notes and the dynamics line have to share a coordinate system, so
         # both move together when the music is shifted to start at row zero.
@@ -264,12 +287,13 @@ class RollDigitizer:
             notes=notes,
             dynamics=dynamics,
             profile=self.profile,
+            paper=paper,
             dpi=dpi,
             rows_processed=rows_processed,
         )
 
     def _segment(
-        self, band: np.ndarray, background: str, start: int, stop: int
+        self, band: np.ndarray, paper: PaperModel, start: int, stop: int
     ) -> Optional[BandMasks]:
         """Segment one band, or None if it cannot be segmented.
 
@@ -281,8 +305,8 @@ class RollDigitizer:
             return segment(
                 self.profile.binarization_method,
                 band,
-                background,
-                **self.profile.binarization_options,
+                paper,
+                **self.profile.segmentation_options(),
             )
         except Exception as exc:
             logger.debug("Segmentation of band %d-%d failed: %s", start, stop, exc)
@@ -303,43 +327,9 @@ class RollDigitizer:
         np.savetxt(os.path.join(self.debug_dir, name), array, delimiter=",", fmt="%d")
 
 
-def guess_background(source: ImageSource, samples: int = 8) -> str:
-    """Work out whether a scan has a black or a white background.
-
-    Reads thin slices spread over the scan and looks at the margins either
-    side of the roll, which is where the background shows.
-
-    Args:
-        source: The scan to inspect.
-        samples: How many slices to look at.
-
-    Returns:
-        ``"black"`` or ``"white"``.
-    """
-    margin = max(1, min(10, source.width // 100))
-    rows = np.linspace(0, max(source.height - 1, 0), samples, dtype=int)
-
-    values = []
-    for row in rows:
-        slice_ = source.read_rows(int(row), int(row) + 1)
-        if not len(slice_):
-            continue
-        edges = np.concatenate((slice_[:, :margin], slice_[:, -margin:]), axis=1)
-        values.append(edges.max(axis=2).mean())
-
-    if not values:
-        raise ValueError("Scan is empty; cannot determine its background colour")
-
-    brightness = float(np.mean(values)) / 255
-    if 0.2 <= brightness <= 0.8:
-        logger.warning(
-            "Scan margins have an inconclusive brightness of %.2f. Automatic "
-            "background detection may be wrong; pass the background explicitly "
-            "if the results look off.",
-            brightness,
-        )
-
-    return "black" if brightness < 0.5 else "white"
+def _describe(colour: np.ndarray) -> str:
+    """A colour as an ``#rrggbb`` string, for log messages."""
+    return "#%02x%02x%02x" % tuple(int(np.clip(c, 0, 255)) for c in colour)
 
 
 def find_roll_start(edges: RollEdges, image_width: int) -> Optional[int]:

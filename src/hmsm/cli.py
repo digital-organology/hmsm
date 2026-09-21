@@ -196,8 +196,13 @@ def _roll2config_parser(parser: argparse.ArgumentParser) -> None:
         "-t",
         "--threshold",
         type=float,
-        default=0.15,
-        help="Binarization threshold, between 0 and 1. Default: %(default)s.",
+        default=0.5,
+        help=(
+            "How far a pixel has to be from the paper towards the scanner "
+            "background to count as a hole, between 0 and 1. The default puts "
+            "the boundary half way, which is where the edge of a hole is. "
+            "Default: %(default)s."
+        ),
     )
     parser.add_argument(
         "-b",

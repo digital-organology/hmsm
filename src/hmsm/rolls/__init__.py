@@ -4,10 +4,11 @@
 
 The pipeline reads a scan in horizontal bands and runs each through four
 stages: :mod:`~hmsm.rolls.binarization` separates holes, printed annotations
-and the paper edges; :mod:`~hmsm.rolls.edges` tracks where the paper sits;
-:mod:`~hmsm.rolls.holes` turns the holes into a note table; and
-:mod:`~hmsm.rolls.annotations` reassembles the dynamics line and pedal marks.
-:class:`~hmsm.rolls.digitizer.RollDigitizer` drives all of it.
+and the paper edges, measuring everything against the paper colours
+:mod:`~hmsm.rolls.paper` reads off the scan; :mod:`~hmsm.rolls.edges` tracks
+where the paper sits; :mod:`~hmsm.rolls.holes` turns the holes into a note
+table; and :mod:`~hmsm.rolls.annotations` reassembles the dynamics line and
+pedal marks. :class:`~hmsm.rolls.digitizer.RollDigitizer` drives all of it.
 
 Typical use::
 
@@ -18,10 +19,11 @@ Typical use::
     transcription.to_midi(tempo=60).write("out.mid")
 """
 
-from hmsm.rolls.annotations import AnnotationCollector
+from hmsm.rolls.annotations import AnnotationCollector, Fragments
 from hmsm.rolls.binarization import (
     BandMasks,
     BinarizationError,
+    InkMask,
     available_methods,
     binarizer,
     segment,
@@ -31,7 +33,6 @@ from hmsm.rolls.digitizer import (
     RollDigitizer,
     Transcription,
     find_roll_start,
-    guess_background,
 )
 from hmsm.rolls.edges import RollEdges, detect_edges
 from hmsm.rolls.holes import (
@@ -42,6 +43,7 @@ from hmsm.rolls.holes import (
     find_components,
 )
 from hmsm.rolls.notes import ControlCode, merge_notes, rebase
+from hmsm.rolls.paper import PaperError, PaperModel, sample_scan
 
 __all__ = [
     "AnnotationCollector",
@@ -50,6 +52,10 @@ __all__ = [
     "Components",
     "ControlCode",
     "DEFAULT_BAND_HEIGHT",
+    "Fragments",
+    "InkMask",
+    "PaperError",
+    "PaperModel",
     "RollDigitizer",
     "RollEdges",
     "Transcription",
@@ -61,10 +67,10 @@ __all__ = [
     "filter_components",
     "find_components",
     "find_roll_start",
-    "guess_background",
     "merge_notes",
     "rebase",
     "roll_to_midi",
+    "sample_scan",
     "segment",
 ]
 

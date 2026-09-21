@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import pathlib
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -25,10 +24,11 @@ import numpy as np
 import sklearn.cluster
 
 from hmsm.io import ImageSource, open_source
-from hmsm.profiles import HOLE_WIDTH_TOLERANCE, RollProfile
-from hmsm.rolls.binarization import segment
-from hmsm.rolls.digitizer import DEFAULT_BAND_HEIGHT, guess_background
+from hmsm.profiles import HOLE_DENSITY_BOUNDS, HOLE_WIDTH_TOLERANCE, RollProfile
+from hmsm.rolls.binarization import HOLE_GROW, HOLE_SEED, segment
+from hmsm.rolls.digitizer import DEFAULT_BAND_HEIGHT
 from hmsm.rolls.holes import filter_components, find_components
+from hmsm.rolls.paper import PaperModel, sample_scan
 from hmsm.units import DEFAULT_DPI, mm_to_px
 
 logger = logging.getLogger(__name__)
@@ -59,21 +59,24 @@ class DetectedTracks:
         self,
         roll_width_mm: float,
         hole_width_mm: float,
-        threshold: float,
+        threshold: float = HOLE_GROW,
     ) -> RollProfile:
         """Build a profile stub from the detected tracks.
 
         Tones are numbered from zero and have to be replaced with the actual
-        MIDI notes of the format before the profile is usable.
+        MIDI notes of the format before the profile is usable, and any printed
+        markings the format carries have to be declared as ink layers; see
+        ``docs/CONFIG.md``.
         """
+        options = {} if threshold == HOLE_GROW else {"hole_grow": threshold}
         return RollProfile.from_dict(
             {
                 "media_type": "roll",
                 "method": "roll",
                 "roll_width_mm": roll_width_mm,
                 "hole_width_mm": hole_width_mm,
-                "binarization_method": "v_channel",
-                "binarization_options": {"threshold": threshold},
+                "binarization_method": "paper_relative",
+                "binarization_options": options,
                 "track_measurements": [
                     {
                         "left": float(self.left[i] * roll_width_mm),
@@ -89,7 +92,7 @@ class DetectedTracks:
 def detect_tracks(
     source: ImageSource,
     hole_width_mm: float = 1.5,
-    threshold: float = 0.15,
+    threshold: float = HOLE_GROW,
     bandwidth: float = 2.0,
     band_height: int = DEFAULT_BAND_HEIGHT,
     skip_rows: int = 0,
@@ -104,7 +107,10 @@ def detect_tracks(
     Args:
         source: The scan to analyse.
         hole_width_mm: Nominal width of the holes on the roll.
-        threshold: Binarization threshold, in ``[0, 1]``.
+        threshold: Transmission at which a pixel counts as a hole: zero is
+            clean paper and one is the scanner background showing through.
+            The default puts the boundary half way, which is where the edge
+            of a hole actually is.
         bandwidth: Clustering bandwidth, in thousandths of the roll width.
             Raise it to group more positions into one track, lower it to
             separate more.
@@ -119,15 +125,15 @@ def detect_tracks(
     Returns:
         The detected tracks, ordered left to right.
     """
-    background = background or guess_background(source)
-    logger.info("Treating the scan as having a %s background", background)
+    paper = PaperModel.estimate(sample_scan(source), dpi=dpi, background=background)
+    logger.info("Treating the scan as having a %s background", paper.background_name)
 
     low, high = sorted(HOLE_WIDTH_TOLERANCE)
     nominal = mm_to_px(hole_width_mm, dpi)
     width_bounds = (int(nominal * low), int(nominal * high))
 
     positions = _hole_positions(
-        source, background, threshold, width_bounds, band_height, skip_rows
+        source, paper, threshold, width_bounds, band_height, skip_rows
     )
 
     if len(positions) == 0:
@@ -156,7 +162,7 @@ def analyze_roll(
     roll_width_mm: float,
     skip_rows: int = 0,
     hole_width_mm: float = 1.5,
-    threshold: float = 0.15,
+    threshold: float = HOLE_GROW,
     bandwidth: float = 2.0,
     band_height: int = DEFAULT_BAND_HEIGHT,
 ) -> RollProfile:
@@ -168,7 +174,7 @@ def analyze_roll(
         roll_width_mm: Physical width of the roll.
         skip_rows: Rows to skip from the top of the scan.
         hole_width_mm: Nominal width of the holes on the roll.
-        threshold: Binarization threshold, in ``[0, 1]``.
+        threshold: Transmission at which a pixel counts as a hole, in ``[0, 1]``.
         bandwidth: Clustering bandwidth, in thousandths of the roll width.
         band_height: Number of scan rows to process at a time.
 
@@ -198,7 +204,7 @@ def analyze_roll(
 
 def _hole_positions(
     source: ImageSource,
-    background: str,
+    paper: PaperModel,
     threshold: float,
     width_bounds: Tuple[int, int],
     band_height: int,
@@ -210,11 +216,11 @@ def _hole_positions(
     for (start, stop), band in source.bands(band_height, start=skip_rows):
         try:
             masks = segment(
-                "v_channel",
+                "paper_relative",
                 band,
-                background,
-                threshold=threshold,
-                roll_detection_threshold="auto",
+                paper,
+                hole_seed=max(threshold, HOLE_SEED),
+                hole_grow=threshold,
             )
         except Exception as exc:
             logger.info(
@@ -226,6 +232,7 @@ def _hole_positions(
             find_components(masks.holes),
             width_bounds=width_bounds,
             height_bounds=(width_bounds[0], band_height / 2),
+            density_bounds=HOLE_DENSITY_BOUNDS,
         )
         if len(components) == 0:
             continue
@@ -277,6 +284,11 @@ def _profile_to_dict(profile: RollProfile) -> dict:
     if profile.hole_width_mm:
         widths = profile.hole_width_mm
         data["hole_width_mm"] = widths[0] if len(widths) == 1 else list(widths)
-    if profile.pedal_cutoff is not None:
-        data["pedal_cutoff"] = profile.pedal_cutoff
+    if profile.hole_length_mm is not None:
+        data["hole_length_mm"] = list(profile.hole_length_mm)
+    if profile.ink_layers:
+        data["ink_layers"] = [
+            {"name": layer.name, "role": layer.role, "region": list(layer.region)}
+            for layer in profile.ink_layers
+        ]
     return data

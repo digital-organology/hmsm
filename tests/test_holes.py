@@ -61,7 +61,8 @@ def test_tracks_are_assigned_by_position_relative_to_the_roll_edges():
     components = find_components(
         mask_with([(10, 10, 5, 5), (50, 50, 5, 5), (100, 80, 5, 5)])
     )
-    tracks = assign_tracks(components, edges, grid)
+    tracks, accepted = assign_tracks(components, edges, grid)
+    assert accepted.all()
     np.testing.assert_array_equal(grid[tracks, 2], [60, 72, 84])
 
 
@@ -73,8 +74,46 @@ def test_track_assignment_follows_a_roll_that_drifts_sideways():
     # A hole that drifts with the roll stays on the same track.
     boxes = [(10, 10 + 10 // 5, 5, 5), (150, 10 + 150 // 5, 5, 5)]
     components = find_components(mask_with(boxes))
-    tracks = assign_tracks(components, edges, grid)
+    tracks, accepted = assign_tracks(components, edges, grid)
+    assert accepted.all()
     np.testing.assert_array_equal(grid[tracks, 2], [60, 60])
+
+
+def test_a_component_beyond_the_outermost_track_is_not_a_hole():
+    # Two tracks a fifth of the roll apart. A speck in the margin, more than
+    # half that again beyond the last one, belongs to neither and used to be
+    # snapped onto whichever was nearest.
+    grid = np.array([[0.2, 0.25, 60.0], [0.4, 0.45, 72.0]])
+    edges = RollEdges(np.zeros(200, np.int32), np.full(200, 100, np.int32))
+    components = find_components(mask_with([(10, 22, 5, 5), (100, 80, 5, 5)]))
+    tracks, accepted = assign_tracks(components, edges, grid)
+    np.testing.assert_array_equal(accepted, [True, False])
+    assert grid[tracks[0], 2] == 60
+
+
+def test_a_hole_is_matched_by_its_middle_not_its_left_side():
+    # A hole scanned wider than nominal still belongs to its own track: its
+    # middle is what is compared, so the extra width falls either side.
+    grid = np.array([[0.20, 0.30, 60.0], [0.50, 0.60, 72.0]])
+    edges = RollEdges(np.zeros(200, np.int32), np.full(200, 100, np.int32))
+    components = find_components(mask_with([(10, 22, 5, 12)]))
+    tracks, accepted = assign_tracks(components, edges, grid)
+    assert accepted.all() and grid[tracks[0], 2] == 60
+
+
+def test_density_of_a_solid_rectangle_is_one():
+    components = find_components(mask_with([(5, 7, 10, 20)]))
+    np.testing.assert_allclose(components.density, [1.0])
+
+
+def test_long_components_are_rejected_when_the_format_bounds_hole_length():
+    # A fold running the length of the band is the right width for a hole
+    # and nothing like the right length.
+    grid = np.array([[0.1, 0.2, 60.0]])
+    edges = RollEdges(np.zeros(200, np.int32), np.full(200, 100, np.int32))
+    mask = mask_with([(0, 10, 200, 6)])
+    assert len(extract_notes(mask, edges, grid, (3, 10))) == 1
+    assert len(extract_notes(mask, edges, grid, (3, 10), height_bounds=(3, 60))) == 0
 
 
 def test_extract_notes_produces_start_end_and_tone():

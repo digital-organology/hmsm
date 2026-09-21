@@ -64,13 +64,19 @@ class RollEdges:
         return RollEdges(self.left[start:stop], self.right[start:stop])
 
 
-def detect_edges(mask: np.ndarray, smooth: bool = True) -> RollEdges:
+def detect_edges(
+    mask: np.ndarray, smooth: bool = True, invert: bool | None = None
+) -> RollEdges:
     """Find the roll edges on a binary mask of the roll body.
 
     Args:
         mask: Boolean or uint8 mask of a band, True where the roll paper is.
-            If the top left pixel is set the mask is taken to be inverted.
         smooth: Whether to smooth the raw positions. Off is useful for diagnostics.
+        invert: Whether the mask is the other way round, marking everything
+            that is *not* roll. ``None`` guesses from the top left pixel,
+            which is what callers handing over a hole mask want; pass
+            ``False`` where the mask really is the roll body, since a roll
+            whose edge touches column zero defeats the guess.
 
     Raises:
         ValueError: If the mask contains no roll at all.
@@ -80,7 +86,9 @@ def detect_edges(mask: np.ndarray, smooth: bool = True) -> RollEdges:
     """
     mask = mask.astype(bool, copy=False)
 
-    if mask[0, 0]:
+    if invert is None:
+        invert = bool(mask[0, 0])
+    if invert:
         mask = ~mask
 
     # argmax on a boolean row returns the first set column and stops there, so

@@ -3,7 +3,7 @@
         "media_type": "disc_holes",
         "method": "cluster",
         "radius_inner": 0.3777,
-        "first_track": 0.420,
+        "first_track": 0.42,
         "track_mapping": {
             "1": 45,
             "2": 47,
@@ -35,13 +35,8 @@
         "media_type": "roll",
         "method": "roll",
         "roll_width_mm": 286.0,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
-        "pedal_cutoff": 0.095,
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "hole_width_mm": 2.7,
         "track_measurements": [
             {
@@ -429,20 +424,36 @@
                 "right": 282.5436361963976,
                 "tone": 101
             }
+        ],
+        "ink_layers": [
+            {
+                "name": "pedal",
+                "role": "pedal",
+                "region": [
+                    0.0,
+                    0.095
+                ]
+            },
+            {
+                "name": "dynamics",
+                "role": "dynamics",
+                "region": [
+                    0.095,
+                    1.0
+                ]
+            }
         ]
     },
     "phonola_solodant": {
         "media_type": "roll",
         "method": "roll",
         "roll_width_mm": 286.0,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
-        "pedal_cutoff": 0.085,
-        "hole_width_mm": [2.7, 1.7],
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
+        "hole_width_mm": [
+            2.7,
+            1.7
+        ],
         "track_measurements": [
             {
                 "left": 2.594324501953756,
@@ -829,6 +840,24 @@
                 "right": 282.5436361963976,
                 "tone": 101
             }
+        ],
+        "ink_layers": [
+            {
+                "name": "pedal",
+                "role": "pedal",
+                "region": [
+                    0.0,
+                    0.085
+                ]
+            },
+            {
+                "name": "dynamics",
+                "role": "dynamics",
+                "region": [
+                    0.085,
+                    1.0
+                ]
+            }
         ]
     },
     "animatic": {
@@ -836,12 +865,8 @@
         "method": "roll",
         "roll_width_mm": 286.0,
         "hole_width_mm": 1.7,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "track_measurements": [
             {
                 "left": 5.654344694662854,
@@ -1305,7 +1330,7 @@
             },
             {
                 "left": 264.81115627858645,
-                "right": 266.2519979362884, 
+                "right": 266.2519979362884,
                 "tone": 21
             },
             {
@@ -1323,7 +1348,6 @@
                 "right": 274.7523157590158,
                 "tone": -3
             },
-    
             {
                 "left": 279.0129786920159,
                 "right": 280.39892282600744,
@@ -1334,18 +1358,24 @@
                 "right": 283.26275141912544,
                 "tone": -18
             }
+        ],
+        "ink_layers": [
+            {
+                "name": "dynamics",
+                "role": "dynamics",
+                "region": [
+                    0.0,
+                    1.0
+                ]
+            }
         ]
     },
     "generic_73": {
         "media_type": "roll",
         "method": "roll",
         "roll_width_mm": 286.0,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "hole_width_mm": 2.7,
         "track_measurements": [
             {
@@ -1733,17 +1763,24 @@
                 "right": 282.5436361963976,
                 "tone": 101
             }
+        ],
+        "ink_layers": [
+            {
+                "name": "dynamics",
+                "role": "dynamics",
+                "region": [
+                    0.0,
+                    1.0
+                ]
+            }
         ]
     },
     "generic_73_no_dynamics": {
         "media_type": "roll",
         "method": "roll",
         "roll_width_mm": 286.0,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "hole_width_mm": 2.7,
         "track_measurements": [
             {
@@ -2137,11 +2174,8 @@
         "media_type": "roll",
         "method": "roll",
         "roll_width_mm": 286.0,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "hole_width_mm": 2.7,
         "track_measurements": [
             {
@@ -2535,12 +2569,8 @@
         "media_type": "roll",
         "method": "roll",
         "roll_width_mm": 286.0,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "hole_width_mm": 2.7,
         "track_measurements": [
             {
@@ -2928,6 +2958,16 @@
                 "right": 282.5436361963976,
                 "tone": 101
             }
+        ],
+        "ink_layers": [
+            {
+                "name": "dynamics",
+                "role": "dynamics",
+                "region": [
+                    0.0,
+                    1.0
+                ]
+            }
         ]
     },
     "generic_88": {
@@ -2935,12 +2975,8 @@
         "method": "roll",
         "roll_width_mm": 286.0,
         "hole_width_mm": 1.7,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "track_measurements": [
             {
                 "left": 5.654344694662854,
@@ -3404,7 +3440,7 @@
             },
             {
                 "left": 264.81115627858645,
-                "right": 266.2519979362884, 
+                "right": 266.2519979362884,
                 "tone": 21
             },
             {
@@ -3422,7 +3458,6 @@
                 "right": 274.7523157590158,
                 "tone": -3
             },
-    
             {
                 "left": 279.0129786920159,
                 "right": 280.39892282600744,
@@ -3433,6 +3468,16 @@
                 "right": 283.26275141912544,
                 "tone": -18
             }
+        ],
+        "ink_layers": [
+            {
+                "name": "dynamics",
+                "role": "dynamics",
+                "region": [
+                    0.0,
+                    1.0
+                ]
+            }
         ]
     },
     "generic_65": {
@@ -3440,12 +3485,8 @@
         "method": "roll",
         "roll_width_mm": 286.0,
         "hole_width_mm": 2.5,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "track_measurements": [
             {
                 "left": 6.655654470614755,
@@ -3772,6 +3813,16 @@
                 "right": 279.28690315170104,
                 "tone": 33
             }
+        ],
+        "ink_layers": [
+            {
+                "name": "dynamics",
+                "role": "dynamics",
+                "region": [
+                    0.0,
+                    1.0
+                ]
+            }
         ]
     },
     "generic_65_no_dynamics": {
@@ -3779,12 +3830,8 @@
         "method": "roll",
         "roll_width_mm": 286.0,
         "hole_width_mm": 2.5,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.10,
-            "upper_threshold": 0.6,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "track_measurements": [
             {
                 "left": 6.655654470614755,
@@ -4117,11 +4164,8 @@
         "media_type": "roll",
         "method": "roll",
         "roll_width_mm": 286.0,
-        "binarization_method": "v_channel",
-        "binarization_options": {
-            "threshold": 0.15,
-            "roll_detection_threshold": "auto"
-        },
+        "binarization_method": "paper_relative",
+        "binarization_options": {},
         "hole_width_mm": 2.7,
         "track_measurements": [
             {

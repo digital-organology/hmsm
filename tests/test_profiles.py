@@ -67,9 +67,74 @@ def test_missing_required_field_is_named():
         RollProfile.from_dict(data)
 
 
-def test_pedal_cutoff_must_be_a_fraction():
-    with pytest.raises(ProfileError, match="fraction"):
-        RollProfile.from_dict({**MINIMAL, "pedal_cutoff": 42})
+def test_ink_layer_regions_must_be_increasing_fractions():
+    for region in ([0.5, 0.2], [0.0, 1.5], [-0.1, 0.5], [0.3]):
+        with pytest.raises(ProfileError, match="region|two fractions"):
+            RollProfile.from_dict({**MINIMAL, "ink_layers": [_layer(region=region)]})
+
+
+def test_ink_layers_may_not_overlap():
+    with pytest.raises(ProfileError, match="overlap"):
+        RollProfile.from_dict(
+            {
+                **MINIMAL,
+                "ink_layers": [
+                    _layer(name="pedal", region=[0.0, 0.3]),
+                    _layer(name="dynamics", region=[0.2, 1.0]),
+                ],
+            }
+        )
+
+
+def test_touching_ink_layers_are_fine():
+    profile = RollProfile.from_dict(
+        {
+            **MINIMAL,
+            "ink_layers": [
+                _layer(name="pedal", role="pedal", region=[0.0, 0.1]),
+                _layer(name="dynamics", region=[0.1, 1.0]),
+            ],
+        }
+    )
+    assert [layer.name for layer in profile.ink_layers] == ["pedal", "dynamics"]
+    assert profile.layer("pedal").region == (0.0, 0.1)
+    assert profile.layer("tempo") is None
+
+
+def test_an_ink_layer_missing_a_field_is_named():
+    with pytest.raises(ProfileError, match="role"):
+        RollProfile.from_dict(
+            {**MINIMAL, "ink_layers": [{"name": "x", "region": [0.0, 0.5]}]}
+        )
+
+
+def test_an_uninterpreted_role_is_kept_but_flagged():
+    profile = RollProfile.from_dict(
+        {**MINIMAL, "ink_layers": [_layer(name="metrostyle", role="tempo")]}
+    )
+    layer = profile.layer("tempo")
+    assert layer is not None and not layer.is_interpreted
+    # It still reaches segmentation, so its mask can be looked at.
+    assert profile.segmentation_options()["ink_layers"] == [
+        {"name": "metrostyle", "region": [0.0, 1.0]}
+    ]
+
+
+def test_hole_length_must_be_an_increasing_pair():
+    with pytest.raises(ProfileError, match="hole_length_mm"):
+        RollProfile.from_dict({**MINIMAL, "hole_length_mm": [40.0, 4.0]})
+
+
+def test_hole_length_bounds_convert_to_pixels():
+    assert RollProfile.from_dict(MINIMAL).hole_length_bounds_px(300) is None
+    low, high = RollProfile.from_dict(
+        {**MINIMAL, "hole_length_mm": [1.0, 25.4]}
+    ).hole_length_bounds_px(300)
+    assert (low, high) == (11, 300)
+
+
+def _layer(name="dynamics", role="dynamics", region=(0.0, 1.0)):
+    return {"name": name, "role": role, "region": list(region)}
 
 
 def test_alignment_grid_is_relative_and_sorted():
@@ -102,12 +167,11 @@ def test_single_hole_width_is_accepted_as_a_scalar():
     assert RollProfile.from_dict(MINIMAL).primary_hole_width_mm == 2.0
 
 
-def test_annotations_are_detected_from_the_binarization_options():
+def test_annotations_are_detected_from_the_declared_ink_layers():
     assert not RollProfile.from_dict(MINIMAL).has_printed_annotations
-    with_upper = RollProfile.from_dict(
-        {**MINIMAL, "binarization_options": {"threshold": 0.1, "upper_threshold": 0.6}}
-    )
-    assert with_upper.has_printed_annotations
+    assert "ink_layers" not in RollProfile.from_dict(MINIMAL).segmentation_options()
+    with_ink = RollProfile.from_dict({**MINIMAL, "ink_layers": [_layer()]})
+    assert with_ink.has_printed_annotations
 
 
 def test_disc_profile_round_trips_through_its_legacy_dict():

@@ -75,8 +75,12 @@ class Components:
 
     @property
     def density(self) -> np.ndarray:
-        """Fraction of each bounding box that is actually set."""
-        box = np.maximum(self.width, 1) * np.maximum(self.height, 1)
+        """Fraction of each bounding box that is actually set.
+
+        The box is one pixel wider and taller than the extents, which are
+        inclusive, so a solid rectangle comes to exactly one.
+        """
+        box = (self.width + 1) * (self.height + 1)
         return self.area / box
 
     def select(self, keep: np.ndarray) -> "Components":
@@ -165,12 +169,21 @@ def assign_tracks(
     components: Components,
     edges: RollEdges,
     alignment_grid: np.ndarray,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Match each component to the track it sits on.
 
     Position is taken relative to the roll edges at the component's own centre
     row, which is what makes this robust against the roll drifting sideways or
-    curving over the length of a scan.
+    curving over the length of a scan, and from the *middle* of the hole
+    rather than its left side, so that a hole the scan has widened or narrowed
+    still lands on its own track.
+
+    A component nowhere near any track is not a hole. The grid divides the
+    roll into one cell per track, bounded half way to each neighbour and, at
+    the two ends, half a track pitch beyond the outermost track. Anything
+    falling outside every cell is rejected rather than snapped to whichever
+    track happens to be nearest, which is how dirt in the margin used to
+    become a note on the outermost track.
 
     Args:
         components: Components already filtered down to plausible holes.
@@ -179,22 +192,30 @@ def assign_tracks(
             as fractions of the roll width.
 
     Returns:
-        Index into ``alignment_grid`` for each component.
+        The index into ``alignment_grid`` for each component, and a boolean
+        mask of the components that fell within a track's cell at all.
     """
     rows = np.clip(components.center_row, 0, len(edges) - 1)
     roll_width = np.maximum(edges.width[rows], 1)
-    offset = (components.left - edges.left[rows]) / roll_width
+    middle = (components.left + components.right) / 2
+    offset = (middle - edges.left[rows]) / roll_width
 
-    # Nearest track by the left side of the hole. Tracks are sorted, so a
-    # binary search finds the two candidates and we take the closer one.
-    track_left = alignment_grid[:, 0]
-    right = np.searchsorted(track_left, offset)
-    left = np.clip(right - 1, 0, len(track_left) - 1)
-    right = np.clip(right, 0, len(track_left) - 1)
-    closer_right = np.abs(track_left[right] - offset) < np.abs(
-        track_left[left] - offset
-    )
-    return np.where(closer_right, right, left)
+    centers = alignment_grid[:, 0:2].mean(axis=1)
+    boundaries = (centers[:-1] + centers[1:]) / 2
+
+    track = np.searchsorted(boundaries, offset)
+
+    # Between the outermost tracks every component is within half a cell of
+    # one of them by construction; beyond them it has to be within half the
+    # neighbouring pitch to count as a hole at all.
+    if len(centers) > 1:
+        first = centers[0] - (centers[1] - centers[0]) / 2
+        last = centers[-1] + (centers[-1] - centers[-2]) / 2
+        accepted = (offset >= first) & (offset <= last)
+    else:
+        accepted = np.ones(len(offset), dtype=bool)
+
+    return track, accepted
 
 
 def extract_notes(
@@ -202,6 +223,8 @@ def extract_notes(
     edges: RollEdges,
     alignment_grid: np.ndarray,
     width_bounds: Tuple[float, float],
+    height_bounds: Optional[Tuple[float, float]] = None,
+    density_bounds: Optional[Tuple[float, float]] = None,
     row_offset: int = 0,
 ) -> np.ndarray:
     """Extract the note table for one band.
@@ -211,6 +234,12 @@ def extract_notes(
         edges: Roll edges for the band.
         alignment_grid: ``(n, 3)`` array of ``[left, right, tone]``.
         width_bounds: Inclusive width range, in pixels, for a component to count as a hole.
+        height_bounds: Inclusive length range, in pixels, likewise. A hole can
+            be as long as the note it sounds, but not longer than the roll's
+            longest note, which is what separates a chain of holes from a fold
+            or a tear running down the paper.
+        density_bounds: Inclusive bounds on how much of its bounding box a
+            component fills. A punched hole is convex and fills most of it.
         row_offset: Row the band starts at, added to the output timings.
 
     Returns:
@@ -219,13 +248,21 @@ def extract_notes(
         array is empty if the band holds no holes.
     """
     components = filter_components(
-        find_components(masks_holes), width_bounds=width_bounds
+        find_components(masks_holes),
+        width_bounds=width_bounds,
+        height_bounds=height_bounds,
+        density_bounds=density_bounds,
     )
 
     if len(components) == 0:
         return np.empty((0, 3), dtype=np.int64)
 
-    tracks = assign_tracks(components, edges, alignment_grid)
+    tracks, accepted = assign_tracks(components, edges, alignment_grid)
+    if not accepted.all():
+        logger.debug(
+            "Dropped %d component(s) that sit on no track", int((~accepted).sum())
+        )
+        components, tracks = components.select(accepted), tracks[accepted]
 
     return np.column_stack(
         (
