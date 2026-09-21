@@ -156,7 +156,7 @@ def calculate_note_timings(
     """
     start_positions = list()
     end_positions = list()
-    (center_y, center_x) = center
+    center_y, center_x = center
 
     for edge in coords.values():
         # Shift coordinates by the center of the disc to make them centered around (0,0) and calculate the rotation in degrees

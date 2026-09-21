@@ -1,36 +1,52 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
+"""Digitization of disc shaped media, such as Ariston cardboard discs.
+
+Unlike rolls, discs are small enough to hold in memory whole, so this pipeline
+reads the scan in one go. It has not yet been reworked onto the streaming and
+profile machinery the roll pipeline uses; :meth:`~hmsm.profiles.DiscProfile.as_dict`
+is the seam between the two.
+"""
+
+from __future__ import annotations
+
 import logging
-from typing import Optional
 
 import hmsm.discs.cluster
-import hmsm.utils
+from hmsm.io import open_source
+from hmsm.profiles import DiscProfile
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["process_disc"]
 
 
 def process_disc(
     input_path: str,
     output_path: str,
     method: str,
-    config: dict,
-    offset: Optional[int] = 0,
+    profile: DiscProfile,
+    offset: int = 0,
 ) -> None:
-    """Perform image based midi generation on a disc shaped medium
-
-    This is a wrapper method that will read the input image and then dispatch the appropriate processing method.
+    """Digitize a disc scan to MIDI.
 
     Args:
-        input_path (str): File path to the input image
-        output_path (str): File path to the output midi file
-        method (str): Method to use for digitization, currently only 'cluster' is implemented
-        config (dict): Dictionary containing required configuration parameters
+        input_path: Path to the scan of the disc.
+        output_path: Path to write the MIDI file to.
+        method: Digitization method; only ``"cluster"`` exists.
+        profile: Geometry of the disc format.
+        offset: Rotational offset of the disc's starting position, in degrees.
+
+    Raises:
+        ValueError: If ``method`` is not a known digitization method.
     """
-    logging.info(f"Reading input image from {input_path}")
+    if method != "cluster":
+        raise ValueError(f"Unknown disc digitization method '{method}'")
 
-    input = hmsm.utils.read_image(input_path)
+    logger.info("Reading disc scan from %s", input_path)
+    with open_source(input_path) as source:
+        image = source.read_rows(0, source.height)
 
-    logging.info("Input image read successfully")
-
-    if method == "cluster":
-        hmsm.discs.cluster.process_disc(
-            input, output_path, config=config, offset=offset
-        )
+    hmsm.discs.cluster.process_disc(
+        image, output_path, config=profile.as_dict(), offset=offset
+    )

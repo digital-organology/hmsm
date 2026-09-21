@@ -1,316 +1,282 @@
 # Copyright (c) 2023 David Fuhry, Museum of Musical Instruments, Leipzig University
 
-import os
+"""Deriving a profile stub from a roll scan.
 
-os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
+Given a scan of an unfamiliar format, find the tracks it uses and write out a
+profile skeleton for it.  Only tracks that are actually punched on the scan in
+hand can be found, so a roll that exercises every track, such as a test roll
+or a scale, gives the best result; otherwise run this over several scans and
+combine what comes out.
 
-import functools
+The tones in the stub are placeholders. Assigning real MIDI notes to the
+detected tracks is the part that needs a human; see ``docs/CONFIG.md``.
+"""
+
+from __future__ import annotations
+
 import json
 import logging
-import math
+import os
 import pathlib
-from typing import Optional
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
-import cv2
 import numpy as np
-import skimage.filters
-import skimage.io
-import skimage.morphology
-import skimage.util
 import sklearn.cluster
 
-try:
-    import pandas as pd
-except ImportError:
-    _has_pandas = False
-else:
-    _has_pandas = True
+from hmsm.io import ImageSource, open_source
+from hmsm.profiles import HOLE_WIDTH_TOLERANCE, RollProfile
+from hmsm.rolls.binarization import segment
+from hmsm.rolls.digitizer import DEFAULT_BAND_HEIGHT, guess_background
+from hmsm.rolls.holes import filter_components, find_components
+from hmsm.units import DEFAULT_DPI, mm_to_px
 
-try:
-    import enlighten
-except ImportError:
-    _has_enlighten = False
-else:
-    _has_enlighten = True
+logger = logging.getLogger(__name__)
 
-import hmsm.rolls
-import hmsm.rolls.masking
-import hmsm.rolls.masking.methods
-import hmsm.rolls.utils
+#: Track positions are clustered in units of a thousandth of the roll width,
+#: which is what makes the bandwidth argument a comprehensible number.
+_POSITION_SCALE = 1000
+
+
+@dataclass(frozen=True)
+class DetectedTracks:
+    """Track positions found on a scan.
+
+    Attributes:
+        left: Left side of each track, as a fraction of the roll width.
+        right: Right side of each track, as a fraction of the roll width.
+        hole_count: How many holes were seen on each track.
+    """
+
+    left: np.ndarray
+    right: np.ndarray
+    hole_count: np.ndarray
+
+    def __len__(self) -> int:
+        return len(self.left)
+
+    def to_profile(
+        self,
+        roll_width_mm: float,
+        hole_width_mm: float,
+        threshold: float,
+    ) -> RollProfile:
+        """Build a profile stub from the detected tracks.
+
+        Tones are numbered from zero and have to be replaced with the actual
+        MIDI notes of the format before the profile is usable.
+        """
+        return RollProfile.from_dict(
+            {
+                "media_type": "roll",
+                "method": "roll",
+                "roll_width_mm": roll_width_mm,
+                "hole_width_mm": hole_width_mm,
+                "binarization_method": "v_channel",
+                "binarization_options": {"threshold": threshold},
+                "track_measurements": [
+                    {
+                        "left": float(self.left[i] * roll_width_mm),
+                        "right": float(self.right[i] * roll_width_mm),
+                        "tone": i,
+                    }
+                    for i in range(len(self))
+                ],
+            }
+        )
+
+
+def detect_tracks(
+    source: ImageSource,
+    hole_width_mm: float = 1.5,
+    threshold: float = 0.15,
+    bandwidth: float = 2.0,
+    band_height: int = DEFAULT_BAND_HEIGHT,
+    skip_rows: int = 0,
+    background: Optional[str] = None,
+    dpi: float = DEFAULT_DPI,
+) -> DetectedTracks:
+    """Find the track positions used on a roll scan.
+
+    Every hole on the scan is located and its position relative to the roll
+    edges recorded; the positions then cluster into tracks.
+
+    Args:
+        source: The scan to analyse.
+        hole_width_mm: Nominal width of the holes on the roll.
+        threshold: Binarization threshold, in ``[0, 1]``.
+        bandwidth: Clustering bandwidth, in thousandths of the roll width.
+            Raise it to group more positions into one track, lower it to
+            separate more.
+        band_height: Number of scan rows to process at a time.
+        skip_rows: Rows to skip from the top of the scan.
+        background: Scan background colour, detected from the scan if omitted.
+        dpi: Resolution of the scan.
+
+    Raises:
+        ValueError: If no holes could be found on the scan.
+
+    Returns:
+        The detected tracks, ordered left to right.
+    """
+    background = background or guess_background(source)
+    logger.info("Treating the scan as having a %s background", background)
+
+    low, high = sorted(HOLE_WIDTH_TOLERANCE)
+    nominal = mm_to_px(hole_width_mm, dpi)
+    width_bounds = (int(nominal * low), int(nominal * high))
+
+    positions = _hole_positions(
+        source, background, threshold, width_bounds, band_height, skip_rows
+    )
+
+    if len(positions) == 0:
+        raise ValueError(
+            "No holes were found on this scan. Try a different binarization "
+            "threshold or check the declared hole width."
+        )
+
+    logger.info("Found %d holes; clustering them into tracks", len(positions))
+
+    # Cluster on the left side of each hole only. The right side follows from
+    # it, and using one coordinate keeps the bandwidth easy to reason about.
+    mean_shift = sklearn.cluster.MeanShift(bandwidth=bandwidth)
+    labels = mean_shift.fit_predict(
+        np.column_stack((positions[:, 0] * _POSITION_SCALE, np.zeros(len(positions))))
+    )
+
+    tracks = _average_per_cluster(positions, labels)
+    logger.info("Detected %d tracks on the provided scan", len(tracks))
+    return tracks
 
 
 def analyze_roll(
     image_path: str,
     output_path: str,
-    roll_physical_width: float,
-    skip_lines: Optional[int] = 0,
-    hole_width: Optional[float] = 1.5,
-    threshold: Optional[float] = 0.15,
-    bandwidth: Optional[float] = 2,
-    chunk_size: Optional[int] = 4000,
-) -> None:
-    """Detect track positions on a roll scan
-
-    This method will try to detect the track positions on the given roll scan image and create a configuration profile stub for processing rolls of this type as well as various debug images.
+    roll_width_mm: float,
+    skip_rows: int = 0,
+    hole_width_mm: float = 1.5,
+    threshold: float = 0.15,
+    bandwidth: float = 2.0,
+    band_height: int = DEFAULT_BAND_HEIGHT,
+) -> RollProfile:
+    """Analyse a roll scan and write a profile stub for its format.
 
     Args:
-        image_path (str): Path to the input image
-        output_path (str): Path to write the generated configuration stub to
-        roll_physical_width (float): Physical width of the roll in the scan
-        skip_lines (Optional[int], optional): Number of lines to skip from the beginning of the roll scan, useful for excluding the roll head from beeing processed. Defaults to 0.
-        hole_width (Optional[float], optional): Width of the holes on the roll scan in mm. Defaults to 1.5.
-        threshold (Optional[float], optional): Theshold to be used for binarization of the roll scan, must be between 0 and 1. Defaults to 0.15.
-        bandwidth (Optional[float], optional): Bandwidth to use for the underlying clustering alogorithm when grouping notes to tracks. Defaults to 2.
-        chunk_size (Optional[int], optional): Size of the chunks to use when processing the roll. Defaults to 4000.
+        image_path: Path to the roll scan.
+        output_path: Path to write the profile stub to.
+        roll_width_mm: Physical width of the roll.
+        skip_rows: Rows to skip from the top of the scan.
+        hole_width_mm: Nominal width of the holes on the roll.
+        threshold: Binarization threshold, in ``[0, 1]``.
+        bandwidth: Clustering bandwidth, in thousandths of the roll width.
+        band_height: Number of scan rows to process at a time.
 
-    Raises:
-        ImportError: Will be raised if pandas is not available
+    Returns:
+        The profile stub that was written.
     """
-    if not _has_pandas:
-        raise ImportError("This function requires pandas to be installed")
-
-    logging.info("Reading input image from provided path")
-
-    try:
-        image = skimage.io.imread(image_path)
-    except FileNotFoundError:
-        logging.error("Failed to read image from provided path")
-        raise
-
-    image = image[skip_lines:, :]
-
-    image_path = f"{output_path}_images/"
-    pathlib.Path(image_path).mkdir(exist_ok=True)
-
-    logging.info(
-        f"Output images will be written under '{image_path}', existing files under that path may be overwritten"
-    )
-
-    logging.info("Beginning first pass over the roll scan to determine track positions")
-
-    notes = []
-
-    if _has_enlighten:
-        manager = enlighten.get_manager()
-        progress_bar = manager.counter(
-            total=math.ceil(image.shape[0] / chunk_size),
-            desc="Detecting track positions",
-            unit="chunks",
+    with open_source(image_path) as source:
+        tracks = detect_tracks(
+            source,
+            hole_width_mm=hole_width_mm,
+            threshold=threshold,
+            bandwidth=bandwidth,
+            band_height=band_height,
+            skip_rows=skip_rows,
+            dpi=source.dpi or DEFAULT_DPI,
         )
 
-    bg_color = hmsm.rolls.utils.guess_background_color(image)
-    logging.info(f"Determined background color of the provided image to be {bg_color}")
+    profile = tracks.to_profile(roll_width_mm, hole_width_mm, threshold)
 
-    width_bounds = hmsm.rolls._calculate_hole_width_range(hole_width)
+    logger.info("Writing profile stub for %d tracks to '%s'", len(tracks), output_path)
+    pathlib.Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(_profile_to_dict(profile), handle, ensure_ascii=False, indent=4)
 
-    for start in range(0, image.shape[0], chunk_size):
-        end = (
-            start + chunk_size
-            if start + chunk_size < image.shape[0]
-            else image.shape[0]
-        )
+    return profile
 
-        if not _has_enlighten:
-            logging.info(f"Processing chunk from {start} to {end}")
 
-        mask = hmsm.rolls.masking.methods.v_channel(
-            None, image[start:end, :, :], bg_color, threshold
-        )
-        mask = mask["holes"]
+def _hole_positions(
+    source: ImageSource,
+    background: str,
+    threshold: float,
+    width_bounds: Tuple[int, int],
+    band_height: int,
+    skip_rows: int,
+) -> np.ndarray:
+    """Collect the relative left and right position of every hole on a scan."""
+    found: List[np.ndarray] = []
 
-        left_edge, right_edge = hmsm.rolls.masking.methods._get_roll_edges(
-            image[start:end, :, :], "auto"
-        )
-
-        labels = skimage.measure.label(mask, background=False, connectivity=2)
-        components = list(hmsm.utils.to_coord_lists(labels).values())
-
-        components = list(
-            filter(
-                functools.partial(
-                    hmsm.rolls._filter_component,
-                    width_bounds=width_bounds,
-                    height_bounds=(width_bounds[0], chunk_size / 2),
-                ),
-                components,
+    for (start, stop), band in source.bands(band_height, start=skip_rows):
+        try:
+            masks = segment(
+                "v_channel",
+                band,
+                background,
+                threshold=threshold,
+                roll_detection_threshold="auto",
             )
-        )
-
-        for component in components:
-            # Calculate relative position on the roll (from the left roll edge)
-            height, width = tuple(component.max(axis=0) - component.min(axis=0))
-
-            y_position = int(round(component[:, 0].min() + (height / 2)))
-            x_position = int(round(component[:, 1].min() + (width / 2)))
-            roll_width = right_edge[y_position] - left_edge[y_position]
-            left_dist = (component[:, 1].min() - left_edge[y_position]) / roll_width
-            right_dist = (component[:, 1].max() - left_edge[y_position]) / roll_width
-
-            note_height = y_position + start
-
-            note_data = dict(
-                {
-                    "left_dist": left_dist,
-                    "right_dist": right_dist,
-                    "height": note_height,
-                }
+        except Exception as exc:
+            logger.info(
+                "Skipping band %d-%d, which failed to segment: %s", start, stop, exc
             )
+            continue
 
-            notes.append(note_data)
-
-        if _has_enlighten:
-            progress_bar.update()
-
-    if _has_enlighten:
-        manager.stop()
-
-    logging.info("Finished first pass over the roll scan, calculating track positions")
-
-    df = pd.DataFrame.from_records(notes)
-
-    left_dists = df.left_dist.to_numpy() * 1000
-    left_dists = np.column_stack((left_dists, np.zeros(len(left_dists))))
-
-    # Potentially adapt bandwith dynamically to get the desired number of tracks
-
-    mean_shift = sklearn.cluster.MeanShift(bandwidth=bandwidth)
-    mean_shift.fit(
-        np.column_stack(((df.left_dist.to_numpy() * 1000), np.zeros(len(df))))
-    )
-    labels = mean_shift.labels_
-
-    logging.info(f"Found {max(labels) + 1} tracks on the provided roll scan")
-
-    df["track"] = labels
-
-    config = dict(
-        {
-            "media_type": "roll",
-            "method": "roll",
-            "roll_width_mm": roll_physical_width,
-            "hole_width_mm": hole_width,
-            "binarization_method": "v_channel",
-            "binarization_options": {"threshold": threshold},
-        }
-    )
-
-    tm = (
-        df.groupby("track")
-        .mean()
-        .sort_values("left_dist")
-        .reset_index()
-        .apply(
-            lambda row: dict(
-                {
-                    "left": (row.left_dist * roll_physical_width),
-                    "right": (row.right_dist * roll_physical_width),
-                    "tone": row.name,
-                }
-            ),
-            axis=1,
+        components = filter_components(
+            find_components(masks.holes),
+            width_bounds=width_bounds,
+            height_bounds=(width_bounds[0], band_height / 2),
         )
-        .to_list()
-    )
+        if len(components) == 0:
+            continue
 
-    config["track_measurements"] = tm
-
-    logging.info("Beginning second pass over the roll to assign tracks")
-
-    notes = []
-
-    alignment_grid = hmsm.rolls.utils.get_initial_alignment_grid(
-        config["roll_width_mm"], config["track_measurements"]
-    )
-
-    if _has_enlighten:
-        manager = enlighten.get_manager()
-        progress_bar = manager.counter(
-            total=math.ceil(image.shape[0] / chunk_size),
-            desc="Assigning tracks",
-            unit="chunks",
-        )
-
-    for start in range(0, image.shape[0], chunk_size):
-        end = (
-            start + chunk_size
-            if start + chunk_size < image.shape[0]
-            else image.shape[0]
-        )
-
-        if not _has_enlighten:
-            logging.info(f"Processing chunk from {start} to {end}")
-
-        chunk = image[start:end, :, :]
-
-        mask = hmsm.rolls.masking.methods.v_channel(None, chunk, bg_color, threshold)
-        mask = mask["holes"]
-
-        left_edge, right_edge = hmsm.rolls.masking.methods._get_roll_edges(
-            image[start:end, :, :], "auto"
-        )
-
-        labels = skimage.measure.label(mask, background=False, connectivity=2)
-        components = list(hmsm.utils.to_coord_lists(labels).values())
-
-        components = list(
-            filter(
-                functools.partial(
-                    hmsm.rolls._filter_component,
-                    width_bounds=width_bounds,
-                    height_bounds=(width_bounds[0], chunk_size / 2),
-                ),
-                components,
-            )
-        )
-
-        for component in components:
-            # Calculate relative position on the roll (from the left roll edge)
-            height, width = tuple(component.max(axis=0) - component.min(axis=0))
-
-            y_position = int(round(component[:, 0].min() + (height / 2)))
-            x_position = int(round(component[:, 1].min() + (width / 2)))
-            roll_width = right_edge[y_position] - left_edge[y_position]
-            left_dist = (component[:, 1].min() - left_edge[y_position]) / roll_width
-            right_dist = (component[:, 1].max() - left_edge[y_position]) / roll_width
-
-            track_idx = np.abs(alignment_grid[:, 0] - left_dist).argmin()
-
-            notes.append(
-                np.array(
-                    [
-                        component[:, 0].min() + start,
-                        component[:, 0].max() + start,
-                        int(alignment_grid[track_idx, 2]),
-                    ]
+        rows = np.clip(components.center_row, 0, len(masks.edges) - 1)
+        roll_width = np.maximum(masks.edges.width[rows], 1)
+        left = masks.edges.left[rows]
+        found.append(
+            np.column_stack(
+                (
+                    (components.left - left) / roll_width,
+                    (components.right - left) / roll_width,
                 )
             )
+        )
 
-            chunk[component[:, 0], component[:, 1]] = [255, 0, 0]
+    return np.vstack(found) if found else np.empty((0, 2))
 
-            cv2.putText(
-                chunk,
-                str(int(alignment_grid[track_idx, 2])),
-                (
-                    int(np.mean(component, axis=0)[1]),
-                    int(np.mean(component, axis=0)[0]),
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                2,
-            )
 
-        skimage.io.imsave(os.path.join(image_path, f"{start}_{end}.jpg"), chunk)
+def _average_per_cluster(positions: np.ndarray, labels: np.ndarray) -> DetectedTracks:
+    """Average the hole positions within each cluster into one track."""
+    order = labels.argsort(kind="stable")
+    positions, labels = positions[order], labels[order]
 
-        if _has_enlighten:
-            progress_bar.update()
+    _, first, counts = np.unique(labels, return_index=True, return_counts=True)
+    means = np.add.reduceat(positions, first, axis=0) / counts[:, None]
 
-    if _has_enlighten:
-        manager.stop()
+    by_position = means[:, 0].argsort()
+    return DetectedTracks(
+        left=means[by_position, 0],
+        right=means[by_position, 1],
+        hole_count=counts[by_position],
+    )
 
-    logging.info(f"Writing configuration data to '{output_path}'")
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
-
-    return
+def _profile_to_dict(profile: RollProfile) -> dict:
+    """Serialize a profile back to the JSON shape documented in CONFIG.md."""
+    data = {
+        "media_type": "roll",
+        "method": "roll",
+        "roll_width_mm": profile.roll_width_mm,
+        "binarization_method": profile.binarization_method,
+        "binarization_options": dict(profile.binarization_options),
+        "track_measurements": [
+            {"left": t.left_mm, "right": t.right_mm, "tone": t.tone}
+            for t in profile.tracks
+        ],
+    }
+    if profile.hole_width_mm:
+        widths = profile.hole_width_mm
+        data["hole_width_mm"] = widths[0] if len(widths) == 1 else list(widths)
+    if profile.pedal_cutoff is not None:
+        data["pedal_cutoff"] = profile.pedal_cutoff
+    return data

@@ -16,7 +16,10 @@ import hmsm.utils
 
 
 def transform_to_rectangle(
-    image: np.ndarray, offset: Optional[int] = 0, binarize: Optional[bool] = False
+    image: np.ndarray,
+    offset: Optional[int] = 0,
+    binarize: Optional[bool] = False,
+    threshold: Optional[int] = None,
 ) -> np.ndarray:
     """Transforms an image of a circular music storage medium to the shape of a rectangular one
 
@@ -24,6 +27,7 @@ def transform_to_rectangle(
         image (np.ndarray): The image to be transformed, can be a binary image as returned by :func:`~hmsm.utils.read_image` or just an image as read by skimage.imread
         offset (Optional[int], optional): The offset (in degrees, counterclockwise) of the beginning of the disc. Defaults to 0.
         binarize (Optional[bool], optional): Weather the output image should be binarized.
+        threshold (Optional[int], optional): Threshold in [0, 255] to binarize with. Estimated with Otsu's method if missing. Defaults to None.
 
     Returns:
         np.ndarray: Image of the transformed medium
@@ -31,7 +35,7 @@ def transform_to_rectangle(
     # Apply preprocessing
 
     if binarize:
-        image = hmsm.utils.binarize_image(image)
+        image = hmsm.utils.binarize_image(image, threshold)
 
     image = hmsm.utils.crop_image_to_contents(image.copy())
 

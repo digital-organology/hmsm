@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hmsm"
-version = "0.9.2"
+version = "0.10.0"
 authors = [
     {name = "David Fuhry", email = "d.fuhry@tu-berlin.de"}
 ]
@@ -35,28 +35,32 @@ dependencies = [
     "scikit-learn",
     "mido",
     "scipy",
-    "imagecodecs",
-    "pandas"
+    "tifffile",
+    "imagecodecs"
 ]
 
 [project.optional-dependencies]
 midi2disc = ["cairosvg", "vnoise"]
 progressbar = ["enlighten"]
+dev = ["pytest"]
 
 [project.urls]
 homepage = "https://organology.uni-leipzig.de/"
 repository = "https://github.com/digital-organology/hmsm"
 
 [project.scripts]
+hmsm = "hmsm.cli:main"
 disc2roll = "hmsm.cli:disc2roll"
 disc2midi = "hmsm.cli:disc2midi"
-roll2masks = "hmsm.cli:roll2masks"
 roll2midi = "hmsm.cli:roll2midi"
 midi2disc = "hmsm.cli:midi2disc"
 roll2config = "hmsm.cli:roll2config"
 
-[tools.setuptools.packages.find]
-exclude = ["assets*", "docs*"]
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["assets*", "docs*", "examples*"]
 
 [tool.setuptools.package-data]
 "hmsm.data" = ["*.json", "*.npy"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]

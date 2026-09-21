@@ -254,6 +254,22 @@ def image_from_coords(
 
 
 def to_coord_lists(edge_image: np.ndarray) -> dict:
+    """Group the pixels of each connected component into a coordinate list
+
+    Note:
+        This materializes the coordinates of every set pixel, which costs
+        roughly a gigabyte per four thousand rows of a roll scan. The roll
+        pipeline no longer uses it; see :func:`hmsm.rolls.holes.find_components`,
+        which reads bounding boxes and areas straight out of the connected
+        component analysis instead. Only the disc pipeline still needs the
+        coordinates themselves, and it will be ported in due course.
+
+    Args:
+        edge_image (np.ndarray): Binary image to label
+
+    Returns:
+        dict: Label to Nx2 array of (row, column) coordinates
+    """
     # Label connected components
     labels = skimage.measure.label(edge_image, background=0, connectivity=2)
 
@@ -275,7 +291,7 @@ def to_coord_lists(edge_image: np.ndarray) -> dict:
 
     logger = logging.getLogger()
 
-    if logger.isEnabledFor(logging.DEBUG):
+    if logger.isEnabledFor(logging.DEBUG) and os.path.isdir("debug_data"):
         image = image_from_coords(indices, edge_image.shape, keys)
         cv2.imwrite(os.path.join("debug_data", "labels.jpg"), image)
 
