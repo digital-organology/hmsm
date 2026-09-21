@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { advance, sounding, playbackRatio } from '../src/player.js';
+import { advance, sounding, playbackRatio, playbackSeconds } from '../src/player.js';
 
 test('transport obeys speed and never outruns digitization', () => {
   assert.equal(advance(100, 1, 2, 0.01, 500), 300);
@@ -47,4 +47,10 @@ test('feet per minute maps to the marked MIDI tempo', () => {
   assert.equal(playbackRatio(9, 60), 1.5);
   assert.equal(playbackRatio(2, 80), 0.25);
   assert.equal(playbackRatio(16, 80), 2);
+});
+
+test('playback time scales with tempo', () => {
+  assert.equal(playbackSeconds(6000, 0.01, 1), 60);
+  assert.equal(playbackSeconds(6000, 0.01, 2), 30);
+  assert.equal(playbackSeconds(6000, 0.01, 0.5), 120);
 });

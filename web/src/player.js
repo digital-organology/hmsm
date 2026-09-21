@@ -8,6 +8,10 @@ export function advance(row, elapsed, speed, secondsPerRow, safeRow) {
   return Math.min(safeRow, row + elapsed * speed / secondsPerRow);
 }
 
+export function playbackSeconds(rows, secondsPerRow, speed) {
+  return rows * secondsPerRow / speed;
+}
+
 export function sounding(notes, row) {
   return notes.filter(([start, end, tone]) => tone > 0 && tone <= 127 && start <= row && end > row);
 }

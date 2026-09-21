@@ -1,5 +1,5 @@
 import './style.css';
-import { advance, sounding, playbackRatio, Piano } from './player.js';
+import { advance, sounding, playbackRatio, playbackSeconds, Piano } from './player.js';
 
 const $ = id => document.getElementById(id);
 $('app').innerHTML = `
@@ -231,7 +231,9 @@ $('replacement-file').onchange = async e => {
   $('replacement-file').value = '';
 };
 function time(rows) {
-  const seconds = Math.max(0, Math.floor(rows * (state?.seconds_per_row || 0)));
+  const seconds = Math.max(0, Math.floor(playbackSeconds(
+    rows, state?.seconds_per_row || 0, state ? speedRatio() : 1
+  )));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 function draw(active) {
