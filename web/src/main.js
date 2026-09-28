@@ -244,9 +244,10 @@ function draw(active) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, width, height);
   if (!state?.width) return;
   const scale = width / state.width, tracker = height * 0.72;
-  // Earlier rows fall below the bar; upcoming paper feeds down from the spool.
-  const y = scanRow => tracker - (scanRow - row) * scale;
-  const low = row - (height - tracker) / scale, high = row + tracker / scale;
+  // Follow the scan from top to bottom, keeping the photograph in its native
+  // orientation instead of mirroring it vertically around the tracker bar.
+  const y = scanRow => tracker + (scanRow - row) * scale;
+  const low = row - tracker / scale, high = row + (height - tracker) / scale;
   const visible = state.tiles.filter(tile => tile.stop >= low && tile.start <= high);
   const wanted = new Set(visible.map(t => t.index));
   // Keep only viewport tiles and neighbours resident in the browser.
@@ -255,8 +256,7 @@ function draw(active) {
     let img = images.get(tile.index);
     if (!img) { img = new Image(); img.src = `/api/jobs/${job}/tiles/${tile.index}.jpg`; images.set(tile.index, img); }
     if (img.complete && img.naturalWidth) {
-      ctx.save(); ctx.translate(0, y(tile.start)); ctx.scale(1, -1);
-      ctx.drawImage(img, 0, 0, width, (tile.stop - tile.start) * scale); ctx.restore();
+      ctx.drawImage(img, 0, y(tile.start), width, (tile.stop - tile.start) * scale);
     }
   }
   const activeKeys = new Set(active.map(n => `${n[0]}:${n[2]}`));
@@ -276,8 +276,8 @@ function draw(active) {
         if (b <= a) continue;
         const x = (left + (right - left) * track[0]) * scale;
         const w = Math.max(2, (right - left) * (track[1] - track[0]) * scale);
-        ctx.fillRect(x, y(b), w, Math.max(1, (b - a) * scale));
-        ctx.strokeRect(x, y(b), w, Math.max(1, (b - a) * scale));
+        ctx.fillRect(x, y(a), w, Math.max(1, (b - a) * scale));
+        ctx.strokeRect(x, y(a), w, Math.max(1, (b - a) * scale));
       }
     }
   }
